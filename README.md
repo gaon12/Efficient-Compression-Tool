@@ -1,67 +1,78 @@
 Efficient Compression Tool
 ============================
 
-Efficient Compression Tool (or ECT) is a C++ file optimizer.  
-It supports PNG, JPEG, WebP (non-animated lossless optimization), GZIP and ZIP files.
+Efficient Compression Tool (ECT) is now implemented in pure Go.
+It does not wrap or call any C/C++ compressor binaries.
 
-## Behavior Notes (2026-04-21)
-- Type detection uses file signatures (magic bytes) before file extensions.
-- ZIP stored entries are recompressed with Deflate by default if this makes output smaller.
-- `--strict` keeps ZIP stored entries as stored (no stored->deflate conversion).
-- Zip64 single-disk archives are supported for reading and writing.
-- Multi-disk ZIP/Zip64 archives are not supported and fail safely.
-- Animated WebP files are skipped (not treated as an error).
+## Legacy C/C++ Branch
+If you are looking for the legacy C/C++ implementation (improved fork version, not the original upstream), check the `enhance-ect` branch.
 
-## CLI Notes
-- `--disable-webp`: disable WebP optimization.
-- `--`: treat all following arguments as positional paths, even if they start with `-`.
+## Highlights
+- Pure Go library + CLI split:
+  - importable library: `pkg/ect`
+  - executable CLI: `cmd/ect`
+- No CMake, NASM, or C/C++ runtime dependency required
+- Type detection uses file signatures (magic bytes) before extensions
+- ZIP stored entries are recompressed with Deflate by default when beneficial
+- `--strict` keeps ZIP stored entries as stored
+- `--mt-file[=N]` enables multi-worker file processing
+- `--`: treat all following arguments as positional paths
 
-Performance (v0.9.7)
--------------------------
-Benchmarked on 2026-04-21.
+## Supported Formats and Behavior
+- PNG: lossless recompression via Go PNG encoder
+- JPEG: metadata stripping when `-strip` is set (lossless pixel data)
+- WebP: detected and parsed; animated WebP is skipped
+- GZIP: optimize existing `.gz` files and create `.gz` from regular files with `-gzip`
+- ZIP: optimize existing archives; create new `.zip` archives with `-zip`
 
-- OS: Windows 11
-- CPU: Intel Core i3-8130U (2C/4T)
-- Compiler: MSVC (Release)
-- Input: `enwik8` (100,000,000 bytes), `-gzip` mode
-- Notes: each level was run once on the same machine
-
-|  Compressor    |  File Size   | Time       |
-|  ----------    |  -----       | ---------- |
-|  ECT -1        |  36,493,273  |      5.1s  |
-|  ECT -3        |  35,014,572  |     32.6s  |
-|  ECT -5        |  34,942,674  |     54.4s  |
-|  ECT -7        |  34,942,246  |   2m 12.3s |
-|  ECT -9        |  34,937,520  |   4m 46.7s |
-
-## Building
-To build ECT, you need to recursively clone it, just downloading isn’t enough, i. e. `git clone --recursive https://github.com/fhanau/Efficient-Compression-Tool.git`  
-You may also need to install `nasm` if it is not available already.
-
-### Command line
-ECT is built with `cmake`  
+## CLI
 ```bash
-mkdir build
-cd build
-cmake ../src
-make
+ect [options] files/folders...
 ```
 
-In addition, you can add the following arguments to the cmake call to turn various features on and off:  
-- `-DECT_MULTITHREADING=OFF`: Turn off multithreading support
+Common options:
+- `-1` to `-9`: compression level (default `-3`)
+- `-strip`: strip metadata where supported
+- `-recurse`: recursively process directories
+- `-gzip`: gzip mode (optimize `.gz`, compress non-gzip files to `.gz`)
+- `-zip`: zip packaging mode (create `.zip` for each input path)
+- `-keep`: keep original modification time
+- `-quiet`: print only errors
+- `--disable-png`, `--disable-jpg`, `--disable-webp`
+- `--strict`
+- `--`
 
-### With Xcode
-You can use cmake to generate an Xcode project.  Just add `-G Xcode` to the end of the cmake command:
+Compatibility note:
+- Legacy flags such as `-progressive`, `-autorotate`, `--mt-deflate`, `--reuse`, `--allfilters`, `--pal_sort` are accepted for CLI compatibility as no-op flags.
+- `--mt-file` is active and controls parallel workers.
+
+## Library Usage
+```go
+package main
+
+import (
+    "fmt"
+
+    "github.com/fhanau/efficient-compression-tool/pkg/ect"
+)
+
+func main() {
+    cfg := ect.DefaultConfig()
+    cfg.GzipMode = true
+    cfg.Recursive = true
+
+    result := ect.Process(cfg, []string{"./assets"})
+    fmt.Println("processed:", result.ProcessedFiles)
+    fmt.Println("saved:", result.SavedBytes)
+}
+```
+
+## Build
 ```bash
-mkdir build
-cd build
-cmake ../src -G Xcode
-make
+go build ./...
 ```
-You will run into a slight issue in that Xcode doesn't know how to compile some of the asm files within mozjpeg.  To fix this, locate your copy of `nasm` (`/usr/local/bin/nasm` in the example) navigate to the Build Rules of the `simd` target, and add a custom rule to process source files matching `*.asm` with the following script:
-```sh
-/usr/local/bin/nasm "-I${PROJECT_DIR}/mozjpeg" -DMACHO -D__x86_64__ "-I${PROJECT_DIR}/mozjpeg/simd/nasm/" "-I${PROJECT_DIR}/mozjpeg/simd/x86_64/" -f macho64 -o "${BUILT_PRODUCTS_DIR}/x86_64/${INPUT_FILE_BASE}.o" "${INPUT_FILE_PATH}"
-```
-and set `$(BUILT_PRODUCTS_DIR)/x86_64/${INPUT_FILE_BASE}.o` as the output files.
 
-If you are using Xcode for development and do not need maximum speed, you can also disable the asm files by adding `-DWITH_SIMD=OFF` to the cmake.
+## Run
+```bash
+go run ./cmd/ect -help
+```

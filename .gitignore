@@ -1,7 +1,13 @@
-# Ignore built objects and build output
+# Legacy build outputs
 *.o
 *.a
 build/
+
+# Go build outputs
+bin/
+/ect
+/ect.exe
+*.test
 
 # macOS ancillary files
 .DS_Store
