@@ -9,6 +9,14 @@
 #include "miniz/miniz.h"
 #include <limits.h>
 #include <atomic>
+#include <cctype>
+#include <vector>
+
+#ifdef WEBP_SUPPORTED
+#include <webp/decode.h>
+#include <webp/encode.h>
+#include <webp/mux.h>
+#endif
 
 #ifndef NOMULTI
 #include <thread>
@@ -28,11 +36,74 @@ static std::atomic<size_t> processedfiles;
 static std::atomic<size_t> bytes;
 static std::atomic<long long> savings;
 
+struct FormattedSize {
+    double value;
+    const char* suffix;
+};
+
+static FormattedSize FormatBytes(double size) {
+    static const char* kUnits[] = {"", "K", "M", "G", "T", "P"};
+    size_t unit_idx = 0;
+    while (size >= 1024.0 && unit_idx < (sizeof(kUnits) / sizeof(kUnits[0])) - 1) {
+        size /= 1024.0;
+        unit_idx++;
+    }
+    return {size, kUnits[unit_idx]};
+}
+
+enum class FileType {
+    UNKNOWN,
+    PNG,
+    JPEG,
+    GZIP,
+    ZIP,
+    WEBP
+};
+
+static std::string GetLowercaseExtension(const char* filepath) {
+    std::string ext = filepath;
+    size_t dot = ext.find_last_of('.');
+    if (dot == std::string::npos || dot + 1 >= ext.size()) {
+        return "";
+    }
+    ext = ext.substr(dot + 1);
+    for (char& c : ext) {
+        c = (char)std::tolower((unsigned char)c);
+    }
+    return ext;
+}
+
+static FileType DetectFileType(const char* filepath) {
+    FILE* stream = fopen(filepath, "rb");
+    if (!stream) {
+        return FileType::UNKNOWN;
+    }
+    unsigned char buf[12] = {0};
+    const size_t read = fread(buf, 1, sizeof(buf), stream);
+    fclose(stream);
+    if (read >= 8 && memcmp(buf, "\x89PNG\r\n\x1A\n", 8) == 0) {
+        return FileType::PNG;
+    }
+    if (read >= 3 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF) {
+        return FileType::JPEG;
+    }
+    if (read >= 3 && buf[0] == 31 && buf[1] == 139 && buf[2] == 8) {
+        return FileType::GZIP;
+    }
+    if (read >= 4 && memcmp(buf, "PK\x03\x04", 4) == 0) {
+        return FileType::ZIP;
+    }
+    if (read >= 12 && memcmp(buf, "RIFF", 4) == 0 && memcmp(buf + 8, "WEBP", 4) == 0) {
+        return FileType::WEBP;
+    }
+    return FileType::UNKNOWN;
+}
+
 static void Usage() {
     printf (
             "Efficient Compression Tool\n"
             "(c) 2014-2025 Felix Hanau.\n"
-            "Version 0.9.5"
+        "Version 0.9.7"
 #ifdef __DATE__
             " compiled on %s\n"
 #endif
@@ -66,11 +137,22 @@ static void Usage() {
             "Advanced Options:\n"
             " --disable-png     Disable PNG optimization\n"
             " --disable-jpg     Disable JPEG optimization\n"
+            " --disable-webp    Disable WebP optimization\n"
             " --strict          Enable strict losslessness\n"
+            " --                Treat all following arguments as input paths\n"
             " --reuse           Keep PNG filter and colortype\n"
             " --allfilters      Try all PNG filter modes\n"
             " --allfilters-b    Try all PNG filter modes, including brute force strategies\n"
             " --pal_sort=i      Try i different PNG palette filtering strategies (up to 120)\n"
+            "\n"
+            "ZIP behavior:\n"
+            "  ZIP stored entries are recompressed with Deflate by default when beneficial.\n"
+            "  In --strict mode, stored entries remain stored.\n"
+            "  Zip64 single-disk archives are supported.\n"
+            "  Multi-disk Zip64 archives are not supported.\n"
+            "\n"
+            "Type detection:\n"
+            "  File signatures (magic bytes) are used before extensions.\n"
 #ifndef NOMULTI
             " --mt-deflate      Use per block multithreading in Deflate\n"
             " --mt-deflate=i    Use per block multithreading in Deflate with i threads\n"
@@ -90,40 +172,32 @@ static void ECT_ReportSavings(){
     long long localSavings = savings.load(std::memory_order_seq_cst);
     if (localProcessedFiles){
         printf("Processed %zu file%s\n", localProcessedFiles, localProcessedFiles > 1 ? "s":"");
-        if (localSavings < 0){
-            printf("Result is bigger\n");
+        if (!localBytes) {
+            printf("No compatible files found\n");
             return;
         }
-
-        int bk = 0;
-        int k = 0;
-        double smul = localSavings;
-        double bmul = localBytes;
-        while (smul > 1024) {smul /= 1024; k++;}
-        while (bmul > 1024) {bmul /= 1024; bk++;}
-        char *counter;
-        if (k == 1) {counter = (char *)"K";}
-        else if (k == 2) {counter = (char *)"M";}
-        else if (k == 3) {counter = (char *)"G";}
-        else {counter = (char *)"";}
-        char *counter2;
-        if (bk == 1){counter2 = (char *)"K";}
-        else if (bk == 2){counter2 = (char *)"M";}
-        else if (bk == 3){counter2 = (char *)"G";}
-        else {counter2 = (char *)"";}
+        const FormattedSize total_fmt = FormatBytes((double)localBytes);
+        if (localSavings < 0){
+            const FormattedSize bigger_fmt = FormatBytes((double)(-localSavings));
+            printf("Result is bigger by ");
+            printf(bigger_fmt.suffix[0] ? "%0.2f%sB" : "%0.0f%sB", bigger_fmt.value, bigger_fmt.suffix);
+            printf(" out of ");
+            printf(total_fmt.suffix[0] ? "%0.2f%sB" : "%0.0f%sB", total_fmt.value, total_fmt.suffix);
+            printf(" (%0.4f%%)\n", (100.0 * localSavings)/localBytes);
+            return;
+        }
+        const FormattedSize savings_fmt = FormatBytes((double)localSavings);
         printf("Saved ");
-        if (k == 0){printf("%0.0f", smul);}
-        else{printf("%0.2f", smul);}
-        printf("%sB out of ", counter);
-        if (bk == 0){printf("%0.0f", bmul);}
-        else{printf("%0.2f", bmul);}
-        printf("%sB (%0.4f%%)\n", counter2, (100.0 * localSavings)/localBytes);}
+        printf(savings_fmt.suffix[0] ? "%0.2f%sB" : "%0.0f%sB", savings_fmt.value, savings_fmt.suffix);
+        printf(" out of ");
+        printf(total_fmt.suffix[0] ? "%0.2f%sB" : "%0.0f%sB", total_fmt.value, total_fmt.suffix);
+        printf(" (%0.4f%%)\n", (100.0 * localSavings)/localBytes);}
     else {printf("No compatible files found\n");}
 }
 
 static int ECTGzip(const char * Infile, const unsigned Mode, unsigned char multithreading, long long fs, unsigned ZIP, int strict){
     if (!fs){
-      printf("%s: Compression of empty files is currently not supported\n", Infile);
+      fprintf(stderr, "%s: Compression of empty files is currently not supported\n", Infile);
       return 2;
     }
     char* gzip_name = 0;
@@ -183,7 +257,7 @@ static unsigned char OptimizePNG(const char * Infile, const ECTOptions& Options)
     int x = 1;
     long long size = filesize(Infile);
     if(size < 0){
-        printf("Can't read from %s\n", Infile);
+        fprintf(stderr, "Can't read from %s\n", Infile);
         return 1;
     }
     if(mode == 9 && !Options.Reuse && !Options.Allfilters){
@@ -257,6 +331,136 @@ static unsigned char OptimizeJPEG(const char * Infile, const ECTOptions& Options
     return res == 2;
 }
 
+#ifdef WEBP_SUPPORTED
+static unsigned char OptimizeWebP(const char * Infile, const ECTOptions& Options){
+    (void)Options;
+    long long input_size = filesize(Infile);
+    if (input_size <= 0) {
+        fprintf(stderr, "%s: can't read from file\n", Infile);
+        return 1;
+    }
+
+    std::vector<uint8_t> input((size_t)input_size);
+    FILE* stream = fopen(Infile, "rb");
+    if (!stream) {
+        fprintf(stderr, "%s: can't open for reading\n", Infile);
+        return 1;
+    }
+    if (fread(input.data(), 1, input.size(), stream) != input.size()) {
+        fclose(stream);
+        fprintf(stderr, "%s: can't read file\n", Infile);
+        return 1;
+    }
+    fclose(stream);
+
+    WebPBitstreamFeatures features;
+    if (WebPGetFeatures(input.data(), input.size(), &features) != VP8_STATUS_OK) {
+        fprintf(stderr, "%s: invalid WebP bitstream\n", Infile);
+        return 1;
+    }
+    if (features.has_animation) {
+        if (Options.SavingsCounter) {
+            printf("%s: animated WebP skipped\n", Infile);
+        }
+        return 0;
+    }
+
+    int width = 0;
+    int height = 0;
+    uint8_t* rgba = WebPDecodeRGBA(input.data(), input.size(), &width, &height);
+    if (!rgba || width <= 0 || height <= 0) {
+        if (rgba) {
+            WebPFree(rgba);
+        }
+        fprintf(stderr, "%s: failed to decode WebP\n", Infile);
+        return 1;
+    }
+
+    uint8_t* bitstream = nullptr;
+    size_t bitstream_size = WebPEncodeLosslessRGBA(rgba, width, height, width * 4, &bitstream);
+    WebPFree(rgba);
+    if (!bitstream || !bitstream_size) {
+        if (bitstream) {
+            WebPFree(bitstream);
+        }
+        fprintf(stderr, "%s: failed to encode WebP lossless bitstream\n", Infile);
+        return 1;
+    }
+
+    WebPData input_data;
+    input_data.bytes = input.data();
+    input_data.size = input.size();
+
+    WebPData image_data;
+    image_data.bytes = bitstream;
+    image_data.size = bitstream_size;
+
+    WebPMux* source_mux = WebPMuxCreate(&input_data, 0);
+    WebPMux* out_mux = WebPMuxNew();
+    if (!out_mux || WebPMuxSetImage(out_mux, &image_data, 1) != WEBP_MUX_OK) {
+        if (source_mux) {
+            WebPMuxDelete(source_mux);
+        }
+        if (out_mux) {
+            WebPMuxDelete(out_mux);
+        }
+        WebPFree(bitstream);
+        fprintf(stderr, "%s: failed to create muxed WebP\n", Infile);
+        return 1;
+    }
+
+    if (source_mux) {
+        static const char* kChunkNames[] = {"ICCP", "EXIF", "XMP "};
+        for (size_t i = 0; i < (sizeof(kChunkNames) / sizeof(kChunkNames[0])); i++) {
+            WebPData chunk;
+            chunk.bytes = nullptr;
+            chunk.size = 0;
+            if (WebPMuxGetChunk(source_mux, kChunkNames[i], &chunk) == WEBP_MUX_OK) {
+                WebPMuxSetChunk(out_mux, kChunkNames[i], &chunk, 1);
+            }
+        }
+    }
+
+    WebPData assembled;
+    WebPDataInit(&assembled);
+    const WebPMuxError mux_status = WebPMuxAssemble(out_mux, &assembled);
+    WebPMuxDelete(out_mux);
+    if (source_mux) {
+        WebPMuxDelete(source_mux);
+    }
+    WebPFree(bitstream);
+
+    if (mux_status != WEBP_MUX_OK) {
+        fprintf(stderr, "%s: failed to assemble optimized WebP\n", Infile);
+        return 1;
+    }
+
+    unsigned char error = 0;
+    if (assembled.size < (size_t)input_size) {
+        stream = fopen(Infile, "wb");
+        if (!stream) {
+            fprintf(stderr, "%s: can't open for writing\n", Infile);
+            error = 1;
+        } else if (fwrite(assembled.bytes, 1, assembled.size, stream) != assembled.size) {
+            fprintf(stderr, "%s: can't write optimized WebP\n", Infile);
+            error = 1;
+        }
+        if (stream) {
+            fclose(stream);
+        }
+    }
+
+    WebPDataClear(&assembled);
+    return error;
+}
+#else
+static unsigned char OptimizeWebP(const char * Infile, const ECTOptions& Options){
+    (void)Infile;
+    (void)Options;
+    return 1;
+}
+#endif
+
 #ifdef MP3_SUPPORTED
 #error MP3 code may corrupt metadata and has been disabled.
 static void OptimizeMP3(const char * Infile, const ECTOptions& Options){
@@ -293,18 +497,25 @@ static void OptimizeMP3(const char * Infile, const ECTOptions& Options){
 #endif
 
 unsigned fileHandler(const char * Infile, const ECTOptions& Options, int internal){
-    std::string Ext = Infile;
-    std::string x = Ext.substr(Ext.find_last_of(".") + 1);
+    const std::string ext = GetLowercaseExtension(Infile);
+    const FileType detected_type = DetectFileType(Infile);
+    const bool handle_png = Options.PNG_ACTIVE && (detected_type == FileType::PNG || (detected_type == FileType::UNKNOWN && ext == "png"));
+    const bool handle_jpeg = Options.JPEG_ACTIVE && (detected_type == FileType::JPEG || (detected_type == FileType::UNKNOWN && (ext == "jpg" || ext == "jpeg")));
+#ifdef WEBP_SUPPORTED
+    const bool handle_webp = Options.WEBP_ACTIVE && (detected_type == FileType::WEBP || (detected_type == FileType::UNKNOWN && ext == "webp"));
+#else
+    const bool handle_webp = false;
+#endif
     time_t t = 0;
     unsigned error = 0;
 
-    if ((Options.PNG_ACTIVE && (x == "PNG" || x == "png")) || (Options.JPEG_ACTIVE && (x == "jpg" || x == "JPG" || x == "JPEG" || x == "jpeg")) || (Options.Gzip && !internal)){
+    if (handle_png || handle_jpeg || handle_webp || (Options.Gzip && !internal)){
         if(Options.keep){
             t = get_file_time(Infile);
         }
         long long size = filesize(Infile);
         if (size < 0){
-            printf("%s: bad file\n", Infile);
+            fprintf(stderr, "%s: bad file\n", Infile);
             return 1;
         }
         int statcompressedfile = 0;
@@ -314,10 +525,12 @@ unsigned fileHandler(const char * Infile, const ECTOptions& Options, int interna
                 if (statcompressedfile == 2){
                     return 1;
                 }
-            } else if (x == "PNG" || x == "png") {
+            } else if (handle_png) {
                 error = OptimizePNG(Infile, Options);
-            } else if (x == "jpg" || x == "JPG" || x == "JPEG" || x == "jpeg") {
+            } else if (handle_jpeg) {
                 error = OptimizeJPEG(Infile, Options);
+            } else if (handle_webp) {
+                error = OptimizeWebP(Infile, Options);
             }
             if(Options.SavingsCounter && !internal){
                 processedfiles.fetch_add(1);
@@ -330,7 +543,7 @@ unsigned fileHandler(const char * Infile, const ECTOptions& Options, int interna
                 }
             }
         }
-        else{printf("File too big\n");}
+        else{fprintf(stderr, "%s: file too big\n", Infile);}
         if(Options.keep && !statcompressedfile){
             set_file_time(Infile, t);
         }
@@ -378,7 +591,7 @@ unsigned zipHandler(std::vector<int> args, const char * argv[], int files, const
             char abs_path[MAX_PATH];
             if (!GetFullPathNameA(argv[args[0]], MAX_PATH, abs_path, 0)) {
 #endif
-                printf("Error: Could not find directory\n");
+                fprintf(stderr, "Error: Could not find directory\n");
                 return 1;
             }
             zipfilename = abs_path;
@@ -388,7 +601,7 @@ unsigned zipHandler(std::vector<int> args, const char * argv[], int files, const
         }
         zipfilename += ".zip";
         if(exists(zipfilename.c_str())){
-            printf("Error: ZIP file for chosen file/folder already exists, but is not listed.\n");
+            fprintf(stderr, "Error: ZIP file for chosen file/folder already exists, but is not listed.\n");
             return 1;
         }
     }
@@ -417,48 +630,45 @@ unsigned zipHandler(std::vector<int> args, const char * argv[], int files, const
                         }
                     }
                     if (!mz_zip_add_mem_to_archive_file_in_place(zipfilename.c_str(), (((std::string)name) + "/").c_str(), 0, 0, 0, 0, file_path)) {
-                        printf("can't add directory '%s'\n", file_path);
+                        fprintf(stderr, "can't add directory '%s'\n", file_path);
                     }
                 }
                 else{
                     long long f = filesize(file_path);
                     if(f > UINT_MAX){
-                        printf("%s: file too big\n", file_path);
+                        fprintf(stderr, "%s: file too big\n", file_path);
                         continue;
                     }
                     if(f < 0){
-                        printf("%s: can't read file\n", file_path);
+                        fprintf(stderr, "%s: can't read file\n", file_path);
                         continue;
                     }
-                    char* file = (char*)malloc(f);
-                    if(!file){
-                        exit(1);
-                    }
+                    const size_t file_size = (size_t)f;
+                    std::vector<char> file(file_size);
                     FILE* stream = fopen(file_path, "rb");
                     if (!stream){
-                        free(file); error = 1; continue;
+                        error = 1; continue;
                     }
-                    if (fread(file, 1, f, stream) != f){
-                        fclose(stream); free(file); error = 1; continue;
+                    if (file_size && fread(file.data(), 1, file_size, stream) != file_size){
+                        fclose(stream); error = 1; continue;
                     }
                     fclose(stream);
-                    if(!mz_zip_add_mem_to_archive_file_in_place(zipfilename.c_str(), name, file, f, 0, 0, file_path)){
-                        printf("can't add file '%s'\n", file_path);
-                        free(file); error = 1; continue;
+                    if(!mz_zip_add_mem_to_archive_file_in_place(zipfilename.c_str(), name, file.data(), file_size, 0, 0, file_path)){
+                        fprintf(stderr, "can't add file '%s'\n", file_path);
+                        error = 1; continue;
                     }
                     else{
                         local_bytes += filesize(file_path);
                     }
-                    free(file);
                 }
             }
             if(!paths.size()){
                 if (!mz_zip_add_mem_to_archive_file_in_place(zipfilename.c_str(), (fold.erase(0, substr) + "/").c_str(), 0, 0, 0, 0, argv[args[i]])) {
-                    printf("can't add directory '%s'\n", argv[args[i]]);
+                    fprintf(stderr, "can't add directory '%s'\n", argv[args[i]]);
                 }
             }
 #else
-            printf("%s: Zipping folders is not supported\n", argv[args[i]]);
+            fprintf(stderr, "%s: Zipping folders is not supported\n", argv[args[i]]);
 #endif
         }
         else{
@@ -466,35 +676,31 @@ unsigned zipHandler(std::vector<int> args, const char * argv[], int files, const
             const char* fname = argv[args[i]];
             long long f = filesize(fname);
             if(f > UINT_MAX){
-                printf("%s: file too big\n", fname);
+                fprintf(stderr, "%s: file too big\n", fname);
                 continue;
             }
             if(f < 0){
-                printf("%s: can't read file\n", fname);
+                fprintf(stderr, "%s: can't read file\n", fname);
                 continue;
             }
-            char* file = (char*)malloc(f);
-            if(!file){
-                exit(1);
-            }
+            const size_t file_size = (size_t)f;
+            std::vector<char> file(file_size);
 
             FILE * stream = fopen (fname, "rb");
             if (!stream){
-                free(file); error = 1; continue;
+                error = 1; continue;
             }
-            if (fread(file, 1, f, stream) != f){
-                fclose(stream); free(file); error = 1; continue;
+            if (file_size && fread(file.data(), 1, file_size, stream) != file_size){
+                fclose(stream); error = 1; continue;
             }
 
             fclose(stream);
-            if (!mz_zip_add_mem_to_archive_file_in_place(zipfilename.c_str(), ((std::string)argv[args[i]]).substr(((std::string)argv[args[i]]).find_last_of("/\\") + 1).c_str(), file, f, 0, 0, argv[args[i]])
+            if (!mz_zip_add_mem_to_archive_file_in_place(zipfilename.c_str(), ((std::string)argv[args[i]]).substr(((std::string)argv[args[i]]).find_last_of("/\\") + 1).c_str(), file.data(), file_size, 0, 0, argv[args[i]])
                 ) {
-                printf("can't add file '%s'\n", argv[0]);
-                free(file); error = 1; continue;
+                fprintf(stderr, "can't add file '%s'\n", argv[0]);
+                error = 1; continue;
             }
             local_bytes += filesize(argv[args[i]]);
-
-            free(file);
 
         }
     }
@@ -533,6 +739,7 @@ int main(int argc, const char * argv[]) {
 #endif
     Options.PNG_ACTIVE = true;
     Options.JPEG_ACTIVE = true;
+    Options.WEBP_ACTIVE = true;
     Options.Arithmetic = false;
     Options.Gzip = false;
     Options.Zip = 0;
@@ -549,9 +756,13 @@ int main(int argc, const char * argv[]) {
     std::vector<int> args;
     int files = 0;
     if (argc >= 2){
+        bool positional_only_mode = false;
         for (int i = 1; i < argc; i++) {
             int strlen = strnlen(argv[i], 64);  //File names may be longer and are unaffected by this check
-            if (strncmp(argv[i], "-", 1) != 0){
+            if (!positional_only_mode && strcmp(argv[i], "--") == 0) {
+                positional_only_mode = true;
+            }
+            else if (positional_only_mode || strncmp(argv[i], "-", 1) != 0){
                 args.push_back(i);
                 files++;
             }
@@ -573,6 +784,7 @@ int main(int argc, const char * argv[]) {
             else if (strncmp(argv[i], "-keep", strlen) == 0) {Options.keep = true;}
             else if (strcmp(argv[i], "--disable-jpeg") == 0 || strcmp(argv[i], "--disable-jpg") == 0 ){Options.JPEG_ACTIVE = false;}
             else if (strcmp(argv[i], "--disable-png") == 0){Options.PNG_ACTIVE = false;}
+            else if (strcmp(argv[i], "--disable-webp") == 0){Options.WEBP_ACTIVE = false;}
 #ifdef FS_SUPPORTED
             else if (strncmp(argv[i], "-recurse", strlen) == 0)  {Options.Recurse = 1;}
 #endif
@@ -608,10 +820,10 @@ int main(int argc, const char * argv[]) {
             }
 #endif
             else if (strcmp(argv[i], "--arithmetic") == 0) {Options.Arithmetic = true;}
-            else {printf("Unknown flag: %s\n", argv[i]); return 0;}
+            else {fprintf(stderr, "Unknown flag: %s\n", argv[i]); return 0;}
         }
         if(Options.Autorotate > 0) {
-            if (!Options.strip) {printf("Flag -autorotate requires -strip\n"); return 0;}
+            if (!Options.strip) {fprintf(stderr, "Flag -autorotate requires -strip\n"); return 0;}
         }
         if(Options.Reuse){
             Options.Allfilters = 0;
