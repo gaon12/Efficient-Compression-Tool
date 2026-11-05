@@ -17,7 +17,11 @@ func detectFileType(path string) (FileType, error) {
 
 	buf := make([]byte, 12)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF {
+	// Short files are fine: ReadFull reports io.EOF for an empty file and
+	// io.ErrUnexpectedEOF for one shorter than buf. Both fall through to the
+	// extension check (an empty "a.zip" is still a ZIP target, not a file to
+	// pack into "a.zip.zip").
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 		return FileUnknown, err
 	}
 	buf = buf[:n]
