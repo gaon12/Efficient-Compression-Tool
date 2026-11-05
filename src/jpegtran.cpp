@@ -22,7 +22,64 @@
 #include "mozjpeg/transupp.h"           /* Support routines for jpegtran */
 #include "main.h"
 #include "support.h"
+#include "mozjpeg/jerror.h"
+#include <csetjmp>
+#include <cstring>
 #include <vector>
+
+/* libjpeg's default error handler calls exit(), which used to end the whole
+   ECT run (all remaining files included) on the first damaged JPEG. This
+   handler jumps back into mozjpegtran instead, and it counts warnings that
+   mean the input is damaged, so that such files are left untouched. */
+struct ECTJpegErrorMgr {
+  struct jpeg_error_mgr pub;
+  jmp_buf* jump;
+  int corrupt_warnings;
+};
+
+METHODDEF(void)
+ect_error_exit (j_common_ptr cinfo)
+{
+  (*cinfo->err->output_message) (cinfo);
+  longjmp(*reinterpret_cast<ECTJpegErrorMgr*>(cinfo->err)->jump, 1);
+}
+
+METHODDEF(void)
+ect_emit_message (j_common_ptr cinfo, int msg_level)
+{
+  if (msg_level >= 0) {
+    return;  /* trace messages */
+  }
+  /* Extraneous bytes between markers carry no image data. Every other
+     warning (premature end of data, corrupt Huffman data, ...) means that
+     libjpeg made up coefficients, and writing them back would replace the
+     damaged original with a "valid" but different image. */
+  if (cinfo->err->msg_code != JWRN_EXTRANEOUS_DATA) {
+    reinterpret_cast<ECTJpegErrorMgr*>(cinfo->err)->corrupt_warnings++;
+  }
+  if (cinfo->err->num_warnings == 0) {
+    (*cinfo->err->output_message) (cinfo);
+  }
+  cinfo->err->num_warnings++;
+}
+
+/* Writes a whole file from two consecutive pieces (the second may be empty).
+   Returns 0 on success, 1 if the file could not be opened (it is untouched)
+   and 2 if writing failed after truncating it. */
+static int write_whole_file (const char * path, const unsigned char * data, size_t size,
+                             const unsigned char * data2, size_t size2)
+{
+  FILE * f = fopen(path, "wb");
+  if (!f) {
+    return 1;
+  }
+  bool ok = fwrite(data, 1, size, f) == size;
+  if (ok && size2) {
+    ok = fwrite(data2, 1, size2, f) == size2;
+  }
+  ok = fclose(f) == 0 && ok;
+  return ok ? 0 : 2;
+}
 
 static size_t jcopy_markers_execute_s (j_decompress_ptr srcinfo, j_compress_ptr dstinfo)
 {
@@ -164,21 +221,29 @@ int mozjpegtran (bool arithmetic, bool progressive, bool strip, unsigned autorot
 {
   struct jpeg_decompress_struct srcinfo;
   struct jpeg_compress_struct dstinfo;
-  struct jpeg_error_mgr jsrcerr, jdsterr;
+  ECTJpegErrorMgr jsrcerr, jdsterr;
+  jmp_buf jump;
   jpeg_transform_info transformoption; /* image transformation options */
   FILE * fp;
   unsigned char *outbuffer = 0;
   unsigned long outsize = 0;
   size_t extrasize = 0;
   unsigned char copy_exif = 0;
-  /* Initialize the JPEG decompression object with default error handling. */
-  srcinfo.err = jpeg_std_error(&jsrcerr);
-  srcinfo.err->output_message = output_message;
   const char* addon = Infile;
-  srcinfo.err->addon_message_table = &addon;
+  /* Initialize the JPEG decompression and compression objects with error
+     handlers that return here instead of terminating the process. */
+  for (ECTJpegErrorMgr* e : {&jsrcerr, &jdsterr}) {
+    jpeg_std_error(&e->pub);
+    e->pub.error_exit = ect_error_exit;
+    e->pub.emit_message = ect_emit_message;
+    e->pub.output_message = output_message;
+    e->pub.addon_message_table = &addon;
+    e->jump = &jump;
+    e->corrupt_warnings = 0;
+  }
+  srcinfo.err = &jsrcerr.pub;
   jpeg_create_decompress(&srcinfo);
-  /* Initialize the JPEG compression object with default error handling. */
-  dstinfo.err = jpeg_std_error(&jdsterr);
+  dstinfo.err = &jdsterr.pub;
   jpeg_create_compress(&dstinfo);
   auto cleanup = [&srcinfo, &dstinfo]() {
     jpeg_destroy_compress(&dstinfo);
@@ -211,6 +276,17 @@ int mozjpegtran (bool arithmetic, bool progressive, bool strip, unsigned autorot
     return 2;
   }
   fclose(fp);
+
+  /* Fatal libjpeg errors (invalid or unsupported data) land here; the
+     message has already been printed by ect_error_exit. jpeg_mem_dest keeps
+     outbuffer pointing at its current buffer, so it can be freed here. This
+     must be set up before jpeg_mem_src, which already fails on empty
+     input. */
+  if (setjmp(jump)) {
+    free(outbuffer);
+    cleanup();
+    return 2;
+  }
 
   jpeg_mem_src(&srcinfo, inbuffer.data(), (size_t)insize);
 
@@ -256,6 +332,19 @@ int mozjpegtran (bool arithmetic, bool progressive, bool strip, unsigned autorot
 
   /* Read source file as DCT coefficients */
   jvirt_barray_ptr * src_coef_arrays = jpeg_read_coefficients(&srcinfo);
+  if (jsrcerr.corrupt_warnings) {
+    fprintf(stderr, "ECT: %s: corrupt JPEG data, file left unchanged\n", Infile);
+    cleanup();
+    return 2;
+  }
+  /* Look for an MPF (multi-picture) APP2 segment now: jpeg_finish_decompress
+     releases the saved markers. */
+  bool has_mpf = false;
+  for (jpeg_saved_marker_ptr m = srcinfo.marker_list; m; m = m->next) {
+    if (m->marker == JPEG_APP0 + 2 && m->data_length >= 4 && memcmp(m->data, "MPF\0", 4) == 0) {
+      has_mpf = true;
+    }
+  }
 
   /* Initialize destination compression parameters from source values */
   jpeg_copy_critical_parameters(&srcinfo, &dstinfo);
@@ -298,29 +387,49 @@ int mozjpegtran (bool arithmetic, bool progressive, bool strip, unsigned autorot
 
   /* Finish compression and release memory */
   jpeg_finish_compress(&dstinfo);
-
-  bool x = insize < outsize;
-
-  if (outsize < insize){
-    /* Open the output file. */
-    if (!(fp = fopen(Outfile, "wb"))) {
-      fprintf(stderr, "ECT: can't open %s for writing\n", Outfile);
-      free(outbuffer);
-      cleanup();
-      return 2;
-    }
-
-    /* Write new file. */
-    if (fwrite(outbuffer, 1, outsize, fp) < outsize) {
-      fprintf(stderr, "ECT: can't write to %s\n", Outfile);
-    }
-    fclose(fp);
+  /* Read the rest of the input up to EOI before deciding to write: damage
+     found there must also keep the original file. */
+  jpeg_finish_decompress(&srcinfo);
+  if (jsrcerr.corrupt_warnings) {
+    fprintf(stderr, "ECT: %s: corrupt JPEG data, file left unchanged\n", Infile);
+    free(outbuffer);
+    cleanup();
+    return 2;
   }
 
-  jpeg_destroy_compress(&dstinfo);
-  jpeg_finish_decompress(&srcinfo);
-  jpeg_destroy_decompress(&srcinfo);
+  /* Data after the EOI marker is not part of the image, but it often matters:
+     phones append the video of "motion photos" there, and multi-picture
+     files (MPF/MPO) store further images there. It is kept unless metadata
+     is stripped. MPF locates its images by offsets that would change with
+     the first image's size, so such files are left untouched. */
+  const unsigned char* trailing = srcinfo.src->next_input_byte;
+  size_t trailing_size = strip ? 0 : srcinfo.src->bytes_in_buffer;
+  if (trailing_size && has_mpf) {
+    fprintf(stderr, "ECT: %s: multi-picture JPEG (MPF) is not supported, file left unchanged\n", Infile);
+    free(outbuffer);
+    cleanup();
+    return 1;
+  }
+  const unsigned long long total = (unsigned long long)outsize + trailing_size;
+
+  int result = (unsigned long long)insize < total;
+
+  if (total < (unsigned long long)insize){
+    /* Rewrite the file in place (keeping its permissions, owner and hard
+       links). If writing fails after the file was truncated, put the
+       original bytes back. */
+    int err = write_whole_file(Outfile, outbuffer, outsize, trailing, trailing_size);
+    if (err) {
+      fprintf(stderr, "ECT: can't write to %s\n", Outfile);
+      if (err == 2 && write_whole_file(Outfile, inbuffer.data(), inbuffer.size(), 0, 0)) {
+        fprintf(stderr, "ECT: could not restore the original contents of %s\n", Outfile);
+      }
+      result = 2;
+    }
+  }
+
   free(outbuffer);
-  (*stripped_outsize) = /*x ? insize : */outsize - extrasize;
-  return x;
+  cleanup();
+  (*stripped_outsize) = outsize - extrasize;
+  return result;
 }
