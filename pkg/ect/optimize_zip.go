@@ -2,14 +2,23 @@ package ect
 
 import (
 	"archive/zip"
+	"bytes"
 	"compress/flate"
+	"encoding/binary"
+	"hash/crc32"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
+
+// minDeflateSize is the entry size below which entries are always stored:
+// for such tiny inputs the deflate framing overhead cannot pay off.
+const minDeflateSize = 64
 
 func optimizeExistingZIP(path string, info os.FileInfo, cfg Config) (before, after int64, changed bool, err error) {
 	before = info.Size()
@@ -32,9 +41,6 @@ func optimizeExistingZIP(path string, info os.FileInfo, cfg Config) (before, aft
 	}
 
 	zw := zip.NewWriter(temp)
-	zw.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
-		return flate.NewWriter(w, levelToFlate(cfg.Level))
-	})
 	_ = zw.SetComment(zr.Comment)
 
 	for _, f := range zr.File {
@@ -79,11 +85,13 @@ func optimizeExistingZIP(path string, info os.FileInfo, cfg Config) (before, aft
 
 func copyZipEntry(zw *zip.Writer, src *zip.File, cfg Config) error {
 	hdr := &zip.FileHeader{
-		Name:     src.Name,
-		Comment:  src.Comment,
-		NonUTF8:  src.NonUTF8,
-		Extra:    append([]byte(nil), src.Extra...),
-		Method:   src.Method,
+		Name:    src.Name,
+		Comment: src.Comment,
+		NonUTF8: src.NonUTF8,
+		// The extended timestamp is regenerated from Modified on write
+		// (by CreateHeader or prepareRawTimestamps); keeping the copied one
+		// would put two 0x5455 fields into the new archive.
+		Extra:    removeExtraField(src.Extra, extTimeExtraID),
 		Modified: src.Modified,
 	}
 
@@ -91,7 +99,7 @@ func copyZipEntry(zw *zip.Writer, src *zip.File, cfg Config) error {
 		hdr.SetMode(mode)
 	}
 	if hdr.Modified.IsZero() {
-		hdr.SetModTime(src.ModTime())
+		hdr.Modified = src.ModTime()
 	}
 
 	if src.FileInfo().IsDir() {
@@ -110,17 +118,7 @@ func copyZipEntry(zw *zip.Writer, src *zip.File, cfg Config) error {
 		return err
 	}
 
-	hdr.Method, err = chooseZipMethod(data, src.Method, cfg)
-	if err != nil {
-		return err
-	}
-
-	w, err := zw.CreateHeader(hdr)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(data)
-	return err
+	return writeZipEntry(zw, hdr, data, mayDeflate(len(data), src.Method, cfg), cfg.Level)
 }
 
 func createZipArchive(input string, cfg Config) (inputBytes int64, outputBytes int64, err error) {
@@ -147,9 +145,6 @@ func createZipArchive(input string, cfg Config) (inputBytes int64, outputBytes i
 	}
 
 	zw := zip.NewWriter(temp)
-	zw.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
-		return flate.NewWriter(w, levelToFlate(cfg.Level))
-	})
 
 	if info.IsDir() {
 		dirs, files, err := collectDirectoryEntries(cleanInput)
@@ -171,8 +166,7 @@ func createZipArchive(input string, cfg Config) (inputBytes int64, outputBytes i
 			if !strings.HasSuffix(rel, "/") {
 				rel += "/"
 			}
-			hdr := &zip.FileHeader{Name: rel, Method: zip.Store}
-			hdr.SetModTime(fakeInfo(dirPath).ModTime())
+			hdr := &zip.FileHeader{Name: rel, Method: zip.Store, Modified: fakeInfo(dirPath).ModTime()}
 			if _, err := zw.CreateHeader(hdr); err != nil {
 				_ = zw.Close()
 				cleanup()
@@ -264,81 +258,166 @@ func addFileToZipWriter(zw *zip.Writer, srcPath, name string, info os.FileInfo, 
 		return 0, err
 	}
 
-	method, err := chooseZipMethod(data, zip.Deflate, cfg)
-	if err != nil {
-		return 0, err
-	}
-
 	hdr, err := zip.FileInfoHeader(info)
 	if err != nil {
 		return 0, err
 	}
 	hdr.Name = filepath.ToSlash(name)
-	hdr.Method = method
 
-	w, err := zw.CreateHeader(hdr)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := w.Write(data); err != nil {
+	if err := writeZipEntry(zw, hdr, data, mayDeflate(len(data), zip.Deflate, cfg), cfg.Level); err != nil {
 		return 0, err
 	}
 	return int64(len(data)), nil
 }
 
-func chooseZipMethod(data []byte, original uint16, cfg Config) (uint16, error) {
-	if len(data) < 64 {
-		return zip.Store, nil
+// mayDeflate reports whether an entry that was originally stored with
+// `original` is allowed to be (re)written with Deflate.
+//   - tiny entries are always stored,
+//   - stored entries stay stored in strict mode,
+//   - entries using other methods (bzip2, LZMA, ...) are stored as-is after
+//     decompression, matching the previous behavior.
+func mayDeflate(size int, original uint16, cfg Config) bool {
+	if size < minDeflateSize {
+		return false
 	}
-
 	switch original {
 	case zip.Store:
-		if cfg.Strict {
-			return zip.Store, nil
-		}
-		deflated, err := deflatedSize(data, cfg.Level)
-		if err != nil {
-			return 0, err
-		}
-		if deflated < len(data) {
-			return zip.Deflate, nil
-		}
-		return zip.Store, nil
+		return !cfg.Strict
 	case zip.Deflate:
-		deflated, err := deflatedSize(data, cfg.Level)
-		if err != nil {
-			return 0, err
-		}
-		if deflated < len(data) {
-			return zip.Deflate, nil
-		}
-		return zip.Store, nil
+		return true
 	default:
-		return zip.Store, nil
+		return false
 	}
 }
 
-type countingWriter struct {
-	n int
-}
+// writeZipEntry writes data as a single entry, compressing it at most once.
+//
+// The data is deflated into memory first; if that is smaller than the input
+// the already-compressed bytes are written with CreateRaw (CRC and sizes are
+// supplied by us). Otherwise the entry is stored. Previously every entry was
+// compressed twice: once to measure the deflated size and once more by the
+// zip.Writer itself.
+func writeZipEntry(zw *zip.Writer, hdr *zip.FileHeader, data []byte, allowDeflate bool, level int) error {
+	if allowDeflate {
+		compressed, err := deflateBytes(data, level)
+		if err != nil {
+			return err
+		}
+		if len(compressed) < len(data) {
+			hdr.Method = zip.Deflate
+			hdr.CRC32 = crc32.ChecksumIEEE(data)
+			hdr.CompressedSize64 = uint64(len(compressed))
+			hdr.UncompressedSize64 = uint64(len(data))
+			prepareRawTimestamps(hdr)
+			w, err := zw.CreateRaw(hdr)
+			if err != nil {
+				return err
+			}
+			_, err = w.Write(compressed)
+			return err
+		}
+	}
 
-func (w *countingWriter) Write(p []byte) (int, error) {
-	w.n += len(p)
-	return len(p), nil
-}
-
-func deflatedSize(data []byte, level int) (int, error) {
-	cw := &countingWriter{}
-	zw, err := flate.NewWriter(cw, levelToFlate(level))
+	hdr.Method = zip.Store
+	w, err := zw.CreateHeader(hdr)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if _, err := zw.Write(data); err != nil {
-		_ = zw.Close()
-		return 0, err
+	_, err = w.Write(data)
+	return err
+}
+
+// extTimeExtraID is the "extended timestamp" extra field (0x5455) that
+// zip.Writer.CreateHeader adds automatically when Modified is set.
+const extTimeExtraID = 0x5455
+
+// prepareRawTimestamps reproduces the timestamp handling that CreateHeader
+// performs but CreateRaw skips: it fills the MS-DOS date/time fields from
+// Modified and appends an extended timestamp extra field unless one is
+// already present (e.g. copied from the source archive).
+func prepareRawTimestamps(hdr *zip.FileHeader) {
+	if hdr.Modified.IsZero() {
+		return
 	}
-	if err := zw.Close(); err != nil {
-		return 0, err
+	hdr.ModifiedDate, hdr.ModifiedTime = msDosTime(hdr.Modified)
+	if hasExtraField(hdr.Extra, extTimeExtraID) || hdr.Modified.Unix() < 0 || hdr.Modified.Unix() > 1<<32-1 {
+		return
 	}
-	return cw.n, nil
+	var field [9]byte
+	binary.LittleEndian.PutUint16(field[0:], extTimeExtraID)
+	binary.LittleEndian.PutUint16(field[2:], 5) // payload size
+	field[4] = 1                                // flags: modification time present
+	binary.LittleEndian.PutUint32(field[5:], uint32(hdr.Modified.Unix()))
+	hdr.Extra = append(hdr.Extra, field[:]...)
+}
+
+func msDosTime(t time.Time) (date, clock uint16) {
+	if t.Year() < 1980 {
+		t = time.Date(1980, 1, 1, 0, 0, 0, 0, t.Location())
+	}
+	date = uint16(t.Day() + int(t.Month())<<5 + (t.Year()-1980)<<9)
+	clock = uint16(t.Second()/2 + t.Minute()<<5 + t.Hour()<<11)
+	return date, clock
+}
+
+func hasExtraField(extra []byte, id uint16) bool {
+	for len(extra) >= 4 {
+		fieldID := binary.LittleEndian.Uint16(extra[0:])
+		size := int(binary.LittleEndian.Uint16(extra[2:]))
+		if fieldID == id {
+			return true
+		}
+		if 4+size > len(extra) {
+			return false
+		}
+		extra = extra[4+size:]
+	}
+	return false
+}
+
+// removeExtraField returns a copy of extra without any field with the given
+// ID. Malformed trailing bytes are kept unchanged.
+func removeExtraField(extra []byte, id uint16) []byte {
+	out := make([]byte, 0, len(extra))
+	for len(extra) >= 4 {
+		size := int(binary.LittleEndian.Uint16(extra[2:]))
+		if 4+size > len(extra) {
+			break
+		}
+		if binary.LittleEndian.Uint16(extra[0:]) != id {
+			out = append(out, extra[:4+size]...)
+		}
+		extra = extra[4+size:]
+	}
+	return append(out, extra...)
+}
+
+// flateWriterPools caches one pool of *flate.Writer per compression level.
+// A flate.Writer allocates roughly 1 MiB of internal state, so reusing it
+// across entries and files avoids a large allocation per ZIP entry.
+var flateWriterPools [flate.BestCompression + 1]sync.Pool
+
+func deflateBytes(data []byte, level int) ([]byte, error) {
+	lvl := levelToFlate(level)
+	var buf bytes.Buffer
+	buf.Grow(len(data) / 2)
+
+	fw, _ := flateWriterPools[lvl].Get().(*flate.Writer)
+	if fw == nil {
+		var err error
+		if fw, err = flate.NewWriter(&buf, lvl); err != nil {
+			return nil, err
+		}
+	} else {
+		fw.Reset(&buf)
+	}
+	defer flateWriterPools[lvl].Put(fw)
+
+	if _, err := fw.Write(data); err != nil {
+		return nil, err
+	}
+	if err := fw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

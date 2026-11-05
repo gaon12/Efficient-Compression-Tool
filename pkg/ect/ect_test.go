@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // quietConfig returns the default configuration without log output.
@@ -373,5 +375,92 @@ func TestSymlinksAreNeverReplaced(t *testing.T) {
 	}
 	if _, err := os.Stat(target + ".gz"); err != nil {
 		t.Fatal("regular file was not processed")
+	}
+}
+
+func TestZipOptimizationKeepsTimestampsWithoutDuplicates(t *testing.T) {
+	modified := time.Date(2021, 6, 15, 10, 30, 42, 0, time.UTC)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: "a.txt", Method: zip.Store, Modified: modified})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = w.Write(compressibleText())
+	_ = zw.Close()
+
+	path := filepath.Join(t.TempDir(), "ts.zip")
+	_ = os.WriteFile(path, buf.Bytes(), 0o644)
+	if res := Process(quietConfig(), []string{path}); res.HasErrors() || res.SavedBytes <= 0 {
+		t.Fatalf("errors=%v saved=%d", res.Errors, res.SavedBytes)
+	}
+
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	f := zr.File[0]
+	if f.Method != zip.Deflate {
+		t.Fatalf("expected deflate, got method %d", f.Method)
+	}
+	if !f.Modified.Equal(modified) {
+		t.Fatalf("modified time changed: got %v, want %v", f.Modified, modified)
+	}
+	count := 0
+	for extra := f.Extra; len(extra) >= 4; {
+		size := int(binary.LittleEndian.Uint16(extra[2:]))
+		if binary.LittleEndian.Uint16(extra) == extTimeExtraID {
+			count++
+		}
+		extra = extra[4+size:]
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one extended timestamp field, got %d", count)
+	}
+}
+
+func TestRemoveExtraField(t *testing.T) {
+	extra := []byte{
+		0x55, 0x54, 0x01, 0x00, 0xaa, // 0x5455, 1 byte
+		0x75, 0x78, 0x02, 0x00, 0xbb, 0xcc, // 0x7875, 2 bytes
+	}
+	got := removeExtraField(extra, extTimeExtraID)
+	want := []byte{0x75, 0x78, 0x02, 0x00, 0xbb, 0xcc}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got % x, want % x", got, want)
+	}
+}
+
+func BenchmarkZipOptimize(b *testing.B) {
+	entries := map[string][]byte{}
+	var order []string
+	for i := 0; i < 32; i++ {
+		name := fmt.Sprintf("file%02d.txt", i)
+		entries[name] = bytes.Repeat([]byte(fmt.Sprintf("line %d of benchmark data\n", i)), 2000)
+		order = append(order, name)
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, name := range order {
+		w, _ := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
+		_, _ = w.Write(entries[name])
+	}
+	_ = zw.Close()
+	src := buf.Bytes()
+
+	dir := b.TempDir()
+	path := filepath.Join(dir, "bench.zip")
+	cfg := quietConfig()
+	b.SetBytes(int64(len(src)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		_ = os.WriteFile(path, src, 0o644)
+		info, _ := os.Stat(path)
+		b.StartTimer()
+		if _, _, _, err := optimizeExistingZIP(path, info, cfg); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
