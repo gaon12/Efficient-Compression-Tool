@@ -26,6 +26,18 @@ All of them share the same command line interface.
 - Zip64 single-disk archives are supported for reading and writing.
 - Multi-disk ZIP/Zip64 archives are not supported and fail safely.
 - Animated WebP files are skipped (not treated as an error).
+- Damaged input is never "repaired": a JPEG that makes libjpeg emit any
+  warning, a PNG with out-of-range palette indices, and ZIP entries whose
+  CRC or size does not match are left byte-for-byte unchanged.
+- A corrupt file does not stop the run; the remaining files are still
+  processed.
+- Data after a JPEG's end-of-image marker (for example the video of a
+  "motion photo") is kept unless `-strip` is given. Multi-picture JPEGs
+  (MPF) are left unchanged.
+- ZIP file and archive comments are kept unless `-strip` is given.
+- PNGs larger than 256 megapixels (2^28 pixels) are skipped.
+- With `--strict`, WebP output keeps the RGB values of fully transparent
+  pixels.
 
 ## CLI Notes
 - `--disable-webp`: disable WebP optimization.
