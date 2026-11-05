@@ -216,6 +216,12 @@ func (p *Processor) processFile(path string, rb *resultBuilder) {
 		rb.addError(path, err)
 		return
 	}
+	// -gzip means "compress every file to <name>.gz", as in the C/C++
+	// version: images are gzipped too rather than optimized in place. Only
+	// existing gzip files are re-optimized (and, under -zip, ZIP archives).
+	if p.cfg.GzipMode && !p.cfg.ZipMode && kind != FileGZIP {
+		kind = FileUnknown
+	}
 
 	switch kind {
 	case FilePNG:
