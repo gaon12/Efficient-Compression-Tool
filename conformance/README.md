@@ -87,7 +87,8 @@ accepts must keep its decoded content, and any other mutant must stay
 byte-identical. Mutants are reproducible from `--seed`.
 
 ```bash
-python3 fuzz.py --impl cpp=/path/to/ect-cpp --impl rust=/path/to/ect-rust     --count 60 --seed 1 --out fuzz.json
+python3 fuzz.py --impl cpp=/path/to/ect-cpp --impl rust=/path/to/ect-rust \
+    --count 60 --seed 1 --out fuzz.json
 ```
 
 The harness found the bugs fixed in `cpp-v0.9.8`, `go-v0.11.0` and
