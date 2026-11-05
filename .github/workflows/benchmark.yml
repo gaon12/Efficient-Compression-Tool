@@ -1,0 +1,161 @@
+# Builds the `cpp`, `go` and `rust` branches on Linux, macOS and Windows
+# and runs bench/bench.py with all three binaries on identical inputs.
+# The combined Markdown report is shown as the job summary of the `report`
+# job and uploaded as an artifact together with the raw JSON results.
+#
+# Shared runners are noisy: compare implementations within one runner, not
+# timings across runs or runners.
+name: benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      levels:
+        description: 'Comma separated ECT levels'
+        required: false
+        default: '1,3,9'
+      runs:
+        description: 'Runs per measurement (median); level 9 runs once'
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+
+env:
+  CORPUS_URL: https://corpus.canterbury.ac.nz/resources/cantrbry.zip
+  LEVELS: ${{ inputs.levels || '1,3,9' }}
+  RUNS: ${{ inputs.runs || '5' }}
+
+jobs:
+  bench:
+    name: bench-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout benchmark tooling (master)
+        uses: actions/checkout@v4
+        with:
+          path: hub
+
+      - name: Checkout cpp branch
+        uses: actions/checkout@v4
+        with:
+          ref: cpp
+          path: cpp
+          submodules: recursive
+
+      - name: Checkout go branch
+        uses: actions/checkout@v4
+        with:
+          ref: go
+          path: go
+
+      - name: Checkout rust branch
+        uses: actions/checkout@v4
+        with:
+          ref: rust
+          path: rust
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache: false  # standard library only, nothing to cache
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install C/C++ build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm ninja-build
+
+      - name: Install C/C++ build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm ninja
+
+      - name: Install C/C++ build tools (Windows)
+        if: runner.os == 'Windows'
+        run: choco install nasm --no-progress -y
+
+      # Release configuration identical to the cpp branch release workflow
+      # (no libwebp, static MSVC runtime on Windows).
+      - name: Build C/C++
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export PATH="/c/Program Files/NASM:$PATH"
+            cmake -S cpp/src -B cpp/build -A x64 -DECT_WEBP_SUPPORT=OFF \
+              -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+            cmake --build cpp/build --config Release --parallel
+            cp cpp/build/Release/ect.exe bin/ect-cpp.exe
+          else
+            cmake -S cpp/src -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DECT_WEBP_SUPPORT=OFF
+            cmake --build cpp/build --parallel
+            cp cpp/build/ect bin/ect-cpp
+          fi
+
+      - name: Build Go
+        working-directory: go
+        env:
+          CGO_ENABLED: '0'
+        run: go build -trimpath -ldflags='-s -w' -o "../bin/ect-go$(go env GOEXE)" ./cmd/ect
+
+      - name: Build Rust
+        working-directory: rust
+        run: |
+          cargo build --release --locked
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          cp "target/release/ect$ext" "../bin/ect-rust$ext"
+
+      - name: Download corpus
+        run: curl -sSfL -o cantrbry.zip "$CORPUS_URL"
+
+      - name: Run benchmark
+        run: |
+          set -euo pipefail
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          python hub/bench/bench.py \
+            --impl cpp=bin/ect-cpp$ext --impl go=bin/ect-go$ext --impl rust=bin/ect-rust$ext \
+            --corpus cantrbry.zip --levels "$LEVELS" --runs "$RUNS" --max-level-runs 1 \
+            --label "${{ matrix.os }} (GitHub Actions)" --out "results-${{ matrix.os }}.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.os }}
+          path: results-${{ matrix.os }}.json
+
+  report:
+    needs: bench
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          path: results
+          merge-multiple: true
+
+      - name: Render report
+        run: |
+          set -euo pipefail
+          python3 bench/report.py results/*.json > RESULTS.md
+          cat RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: |
+            RESULTS.md
+            results/*.json
