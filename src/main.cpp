@@ -364,7 +364,6 @@ static unsigned char OptimizeJPEG(const char * Infile, const ECTOptions& Options
 
 #ifdef WEBP_SUPPORTED
 static unsigned char OptimizeWebP(const char * Infile, const ECTOptions& Options){
-    (void)Options;
     long long input_size = filesize(Infile);
     if (input_size <= 0) {
         fprintf(stderr, "%s: can't read from file\n", Infile);
@@ -407,13 +406,33 @@ static unsigned char OptimizeWebP(const char * Infile, const ECTOptions& Options
         return 1;
     }
 
-    uint8_t* bitstream = nullptr;
-    size_t bitstream_size = WebPEncodeLosslessRGBA(rgba, width, height, width * 4, &bitstream);
+    // Same settings as WebPEncodeLosslessRGBA (lossless, quality 70), but
+    // through the advanced API so that --strict can set `exact`: by
+    // default libwebp may change the RGB values of fully transparent
+    // pixels (invisible, but not bit-exact), as the PNG path does too.
+    WebPConfig config;
+    WebPPicture picture;
+    WebPMemoryWriter writer;
+    WebPMemoryWriterInit(&writer);
+    bool encoded = WebPConfigInit(&config) && WebPPictureInit(&picture);
+    if (encoded) {
+        config.lossless = 1;
+        config.quality = 70;
+        config.exact = Options.Strict ? 1 : 0;
+        picture.use_argb = 1;
+        picture.width = width;
+        picture.height = height;
+        picture.writer = WebPMemoryWrite;
+        picture.custom_ptr = &writer;
+        encoded = WebPValidateConfig(&config) && WebPPictureImportRGBA(&picture, rgba, width * 4) &&
+                  WebPEncode(&config, &picture);
+        WebPPictureFree(&picture);
+    }
     WebPFree(rgba);
-    if (!bitstream || !bitstream_size) {
-        if (bitstream) {
-            WebPFree(bitstream);
-        }
+    uint8_t* bitstream = writer.mem;
+    size_t bitstream_size = writer.size;
+    if (!encoded || !bitstream || !bitstream_size) {
+        WebPMemoryWriterClear(&writer);
         fprintf(stderr, "%s: failed to encode WebP lossless bitstream\n", Infile);
         return 1;
     }
@@ -435,7 +454,7 @@ static unsigned char OptimizeWebP(const char * Infile, const ECTOptions& Options
         if (out_mux) {
             WebPMuxDelete(out_mux);
         }
-        WebPFree(bitstream);
+        WebPMemoryWriterClear(&writer);
         fprintf(stderr, "%s: failed to create muxed WebP\n", Infile);
         return 1;
     }
@@ -459,7 +478,7 @@ static unsigned char OptimizeWebP(const char * Infile, const ECTOptions& Options
     if (source_mux) {
         WebPMuxDelete(source_mux);
     }
-    WebPFree(bitstream);
+    WebPMemoryWriterClear(&writer);
 
     if (mux_status != WEBP_MUX_OK) {
         fprintf(stderr, "%s: failed to assemble optimized WebP\n", Infile);
@@ -472,12 +491,20 @@ static unsigned char OptimizeWebP(const char * Infile, const ECTOptions& Options
         if (!stream) {
             fprintf(stderr, "%s: can't open for writing\n", Infile);
             error = 1;
-        } else if (fwrite(assembled.bytes, 1, assembled.size, stream) != assembled.size) {
-            fprintf(stderr, "%s: can't write optimized WebP\n", Infile);
-            error = 1;
-        }
-        if (stream) {
-            fclose(stream);
+        } else {
+            bool written = fwrite(assembled.bytes, 1, assembled.size, stream) == assembled.size;
+            written = (fclose(stream) == 0) && written;
+            if (!written) {
+                // The file was truncated by fopen: put the original bytes
+                // back rather than leaving a partial image behind.
+                fprintf(stderr, "%s: can't write optimized WebP, restoring the original\n", Infile);
+                FILE* restore = fopen(Infile, "wb");
+                if (restore) {
+                    fwrite(input.data(), 1, input.size(), restore);
+                    fclose(restore);
+                }
+                error = 1;
+            }
         }
     }
 
