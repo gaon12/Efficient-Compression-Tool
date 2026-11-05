@@ -2,7 +2,9 @@ package ect
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 )
@@ -27,9 +29,28 @@ func optimizePNG(path string, info os.FileInfo, cfg Config) (before, after int64
 		return 0, 0, false, fmt.Errorf("PNG dimensions %dx%d exceed the %d pixel limit", imgCfg.Width, imgCfg.Height, maxPNGPixels)
 	}
 
+	before = int64(len(original))
+	chunks, err := parsePNGChunks(original)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	// APNG: image/png decodes only the default image, so re-encoding would
+	// drop every animation frame. Leave animated files alone.
+	if _, animated := findPNGChunk(chunks, "acTL"); animated {
+		return before, before, false, nil
+	}
+
 	img, err := png.Decode(bytes.NewReader(original))
 	if err != nil {
 		return 0, 0, false, err
+	}
+	// image/png silently extends the palette with black entries when a pixel
+	// indexes past the end of PLTE (an invalid file). Writing that palette
+	// back would turn the error into "valid" black pixels, so refuse.
+	if paletted, ok := img.(*image.Paletted); ok {
+		if plte, ok := findPNGChunk(chunks, "PLTE"); ok && len(paletted.Palette) > len(plte.data)/3 {
+			return 0, 0, false, errors.New("palette index out of range of the PLTE chunk")
+		}
 	}
 
 	var out bytes.Buffer
@@ -37,14 +58,19 @@ func optimizePNG(path string, info os.FileInfo, cfg Config) (before, after int64
 	if err := enc.Encode(&out, img); err != nil {
 		return 0, 0, false, err
 	}
+	// The encoder writes no metadata: put gAMA/iCCP/pHYs/text/... back
+	// unless -strip was given.
+	encoded, err := copyPNGMetadata(original, out.Bytes(), cfg.Strip)
+	if err != nil {
+		return 0, 0, false, err
+	}
 
-	before = int64(len(original))
-	after = int64(out.Len())
+	after = int64(len(encoded))
 	if after >= before {
 		return before, before, false, nil
 	}
 
-	if err := replaceWithBytes(path, out.Bytes(), info, cfg.KeepModTime); err != nil {
+	if err := replaceWithBytes(path, encoded, info, cfg.KeepModTime); err != nil {
 		return 0, 0, false, err
 	}
 	return before, after, true, nil
