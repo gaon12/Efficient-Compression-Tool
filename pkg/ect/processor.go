@@ -264,6 +264,14 @@ func (p *Processor) processFile(path string, rb *resultBuilder) {
 			p.cfg.logf("%s: gzip optimized (%d -> %d)", path, before, after)
 		}
 	case FileZIP:
+		// Like the C/C++ version, ZIP archives are only rewritten with
+		// -zip: many formats are ZIP files (.jar, .apk, .docx, .epub, ...)
+		// and rewriting them unasked can break whole-file signatures (APK
+		// v2+) or format-specific layout rules (e.g. EPUB's stored mimetype
+		// entry must come first and stay uncompressed).
+		if !p.cfg.ZipMode {
+			return
+		}
 		before, after, changed, err := optimizeExistingZIP(path, info, p.cfg)
 		if err != nil {
 			rb.addError(path, err)

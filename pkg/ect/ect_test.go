@@ -225,13 +225,24 @@ func TestZipStoredEntriesDeflatedUnlessStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	strict := quietConfig()
+	// Without -zip, ZIP archives are not touched at all.
+	original, _ := os.ReadFile(path)
+	if res := Process(quietConfig(), []string{path}); res.HasErrors() || res.SavedBytes != 0 {
+		t.Fatalf("no -zip: errors=%v saved=%d", res.Errors, res.SavedBytes)
+	}
+	if now, _ := os.ReadFile(path); !bytes.Equal(now, original) {
+		t.Fatal("ZIP archive was rewritten without -zip")
+	}
+
+	zipCfg := quietConfig()
+	zipCfg.ZipMode = true
+	strict := zipCfg
 	strict.Strict = true
 	if res := Process(strict, []string{path}); res.HasErrors() || res.SavedBytes != 0 {
 		t.Fatalf("strict: errors=%v saved=%d", res.Errors, res.SavedBytes)
 	}
 
-	res := Process(quietConfig(), []string{path})
+	res := Process(zipCfg, []string{path})
 	if res.HasErrors() || res.SavedBytes <= 0 {
 		t.Fatalf("errors=%v saved=%d", res.Errors, res.SavedBytes)
 	}
@@ -421,7 +432,9 @@ func TestZipOptimizationKeepsTimestampsWithoutDuplicates(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "ts.zip")
 	_ = os.WriteFile(path, buf.Bytes(), 0o644)
-	if res := Process(quietConfig(), []string{path}); res.HasErrors() || res.SavedBytes <= 0 {
+	cfg := quietConfig()
+	cfg.ZipMode = true
+	if res := Process(cfg, []string{path}); res.HasErrors() || res.SavedBytes <= 0 {
 		t.Fatalf("errors=%v saved=%d", res.Errors, res.SavedBytes)
 	}
 
