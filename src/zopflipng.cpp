@@ -470,6 +470,22 @@ static unsigned TryOptimize(unsigned char* image, size_t imagesize, unsigned w, 
     }
   }
 
+  // Palette and grey images with fewer than 8 bits per pixel pack several
+  // pixels into one byte, so a repeated pattern only matches LZ77 when it
+  // starts at the same position within a byte. Stored with 8 bits per pixel
+  // the image data is larger, but it often deflates to less.
+  if (!error && ref_color.bitdepth < 8 && (ref_color.colortype == LCT_PALETTE || ref_color.colortype == LCT_GREY)) {
+    std::vector<unsigned char> out2;
+    state.encoder.auto_convert = 0;
+    lodepng_color_mode_copy(&state.info_png.color, &ref_color);
+    state.info_png.color.bitdepth = 8;
+    LodePNGPaletteSettings p8;
+    p8.order = LPOS_NONE;
+    if (!lodepng::encode(out2, image, imagesize, w, h, state, p8) && out2.size() < out->size()) {
+      out->swap(out2);
+    }
+  }
+
   if(!error){
     lodepng_color_mode_cleanup(&ref_color);
     lodepng_color_mode_cleanup(&state.out_mode);
