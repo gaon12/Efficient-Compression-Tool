@@ -484,13 +484,13 @@ static unsigned ZopfliPNGOptimize(const char * Infile, const std::vector<unsigne
   unsigned w, h;
   lodepng::State inputstate;
 
-  unsigned error = lodepng::decode(&image, imagesize, w, h, inputstate, &origpng[0], origpng.size());
+  unsigned error = lodepng::decode(&image, imagesize, w, h, inputstate, origpng.data(), origpng.size());
 
   bool bit16 = false;  // Using 16-bit per channel raw image
   if (!error && inputstate.info_png.color.bitdepth == 16 && !png_options.lossy_8bit) {
     // Decode as 16-bit
     free(image);
-    error = lodepng::decode(&image, imagesize, w, h, &origpng[0], origpng.size(), LCT_RGBA, 16);
+    error = lodepng::decode(&image, imagesize, w, h, origpng.data(), origpng.size(), LCT_RGBA, 16);
     bit16 = true;
   }
 
