@@ -479,6 +479,8 @@ def webp_cases() -> list[Case]:
         Case("webp-lossless-rgb", "webp", {"a.webp": webp(im.convert("RGB"), lossless=True, quality=0)}),
         Case("webp-lossy", "webp", {"a.webp": webp(im.convert("RGB"), quality=80)}),
         Case("webp-lossy-alpha", "webp", {"a.webp": webp(im, quality=70)}),
+        Case("webp-lossy-alpha-strict", "webp", {"a.webp": webp(im, quality=70)}, args=["--strict"]),
+        Case("webp-lossless-exact-strict", "webp", {"a.webp": webp(im, lossless=True, quality=0, exact=True)}, args=["--strict"]),
         Case("webp-animated", "webp", {"a.webp": buf.getvalue()}),
         Case("webp-exif", "webp", {"a.webp": webp(im, lossless=True, exif=b"Exif\x00\x00MM\x00*\x00\x00\x00\x08\x00\x00")}),
     ]
@@ -809,7 +811,9 @@ def check_file(kind: str, name: str, before: bytes, after: bytes, args: list[str
         if not msg and b"MPF\x00" in before[:200] and before != after:
             msg = "multi-picture (MPF) JPEG was modified"
     elif before[:4] == b"RIFF":
-        msg = compare_pil(before, after, ignore_transparent=b"VP8L" in before)
+        # RGB under fully transparent pixels is invisible and may change,
+        # except with --strict.
+        msg = compare_pil(before, after, ignore_transparent="--strict" not in args)
     elif before[:2] == b"\x1f\x8b":
         try:
             if gzip.decompress(before) != gzip.decompress(after):

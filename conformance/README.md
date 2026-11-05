@@ -78,6 +78,18 @@ cargo build
 Sanitizer builds need several times more memory than release builds. On
 a machine with 8 GB of RAM, use `--jobs 3` or fewer.
 
+## Mutation fuzzing
+
+`fuzz.py` mutates the valid inputs of a dozen cases (bit flips, byte
+overwrites, truncation, duplicated and deleted ranges). It checks every
+mutant like a regular case: a mutant that a reference decoder still
+accepts must keep its decoded content, and any other mutant must stay
+byte-identical. Mutants are reproducible from `--seed`.
+
+```bash
+python3 fuzz.py --impl cpp=/path/to/ect-cpp --impl rust=/path/to/ect-rust     --count 60 --seed 1 --out fuzz.json
+```
+
 The harness found the bugs fixed in `cpp-v0.9.8`, `go-v0.11.0` and
 `rust-v0.1.0`. Those include lossy color-key PNGs (Rust), dropped PNG
 metadata (Go, Rust) and APNG frames (Go), corrupt JPEGs aborting a whole run
