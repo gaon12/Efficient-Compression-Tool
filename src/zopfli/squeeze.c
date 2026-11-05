@@ -1235,6 +1235,14 @@ void ZopfliLZ77Optimal2(const ZopfliOptions* options,
     if (!costmodelnotinited && !options->multithreading){
       MixCostmodels(&st, &stats, .2);
     }
+    /* The run below uses st when the cost model is reused. For the first
+       block of a file st has not been set from this file yet: it was either
+       never initialized (all costs zero, so the parse kept nearly every
+       byte as a literal) or still held the statistics of the previous file,
+       which made the output depend on the order of the files. */
+    if (costmodelnotinited && options->reuse_costmodel){
+      CopyStats(&stats, &st);
+    }
   }
   else{
     SymbolStats fromBlocksplitting = *statsp;
