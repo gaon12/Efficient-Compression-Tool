@@ -113,26 +113,35 @@ impl Processor {
         normalized.sort();
 
         if self.cfg.zip_mode {
-            self.run_parallel(&normalized, |path| {
-                match zip_opt::create_zip_archive(path, &self.cfg) {
-                    Ok((input, output)) => {
-                        rb.add_processed(input);
-                        rb.add_saved(input as i64 - output as i64);
-                        self.cfg.logf(|| {
-                            format!(
-                                "{}: created ZIP archive ({input} -> {output})",
-                                path.display()
-                            )
-                        });
-                    }
-                    Err(e) => rb.add_error(path, e),
-                }
-            });
+            self.run_parallel(&normalized, |path| self.process_zip_target(path, &rb));
         } else {
             let files = self.collect_files(&normalized, &rb);
             self.run_parallel(&files, |path| self.process_file(path, &rb));
         }
         rb.finish()
+    }
+
+    /// Handles one `-zip` argument, mirroring the C/C++ CLI: an existing ZIP
+    /// archive is re-optimized in place, anything else (a file or a
+    /// directory) is packed into a new `<path>.zip`.
+    fn process_zip_target(&self, path: &Path, rb: &ResultBuilder) {
+        if is_regular_zip_file(path) {
+            self.process_file(path, rb);
+            return;
+        }
+        match zip_opt::create_zip_archive(path, &self.cfg) {
+            Ok((input, output)) => {
+                rb.add_processed(input);
+                rb.add_saved(input as i64 - output as i64);
+                self.cfg.logf(|| {
+                    format!(
+                        "{}: created ZIP archive ({input} -> {output})",
+                        path.display()
+                    )
+                });
+            }
+            Err(e) => rb.add_error(path, e),
+        }
     }
 
     fn run_parallel<F: Fn(&Path) + Sync>(&self, items: &[PathBuf], f: F) {
@@ -235,6 +244,13 @@ impl Processor {
             rb.add_error(path, e);
         }
     }
+}
+
+/// True for a regular file (not a symlink or directory) whose content is a
+/// ZIP archive.
+fn is_regular_zip_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
+        && matches!(detect_file_type(path), Ok(FileType::Zip))
 }
 
 fn walk_dir(dir: &Path, files: &mut BTreeSet<PathBuf>, rb: &ResultBuilder) {

@@ -249,3 +249,25 @@ fn zip_optimization_preserves_modification_time() {
     assert_eq!(entry.compression(), zip::CompressionMethod::Deflated);
     assert_eq!(entry.last_modified(), Some(modified));
 }
+
+#[test]
+fn zip_mode_reoptimizes_existing_archive_in_place() {
+    // Same semantics as the C/C++ CLI: `ect -zip archive.zip` rewrites the
+    // archive instead of creating `archive.zip.zip`.
+    let text = compressible_text();
+    let dir = scratch_dir("zip-in-place");
+    let path = dir.join("a.zip");
+    fs::write(&path, stored_zip(&[("a.txt", &text)])).unwrap();
+    let before = fs::metadata(&path).unwrap().len();
+
+    let cfg = Config {
+        zip_mode: true,
+        gzip_mode: true,
+        ..quiet()
+    };
+    let report = ect::process(cfg, &[&path]);
+    assert!(!report.has_errors(), "{:?}", report.errors);
+    assert!(fs::metadata(&path).unwrap().len() < before);
+    assert!(!dir.join("a.zip.zip").exists());
+    assert_eq!(read_zip(&path), vec![("a.txt".to_string(), text)]);
+}
