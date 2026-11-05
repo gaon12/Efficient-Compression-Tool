@@ -1,0 +1,105 @@
+# CI for the C/C++ implementation of ECT (branch `cpp`), built with CMake.
+name: cpp
+
+on:
+  push:
+    branches: [cpp]
+  pull_request:
+    branches: [cpp]
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  unix:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # NASM is needed for mozjpeg's x86 SIMD code; libwebp enables the
+      # optional lossless WebP optimization.
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm ninja-build libwebp-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm ninja webp
+
+      - name: Configure
+        run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Smoke test
+        run: bash .github/scripts/smoke-test.sh ./build/ect
+
+      - name: Source tree stays clean
+        run: |
+          git status --porcelain --ignore-submodules=none
+          test -z "$(git status --porcelain --ignore-submodules=none)"
+
+  msvc:
+    name: windows-msvc
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install NASM
+        run: choco install nasm --no-progress -y
+
+      - name: Configure
+        shell: bash
+        run: |
+          export PATH="/c/Program Files/NASM:$PATH"
+          cmake -S src -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Smoke test
+        shell: bash
+        run: bash .github/scripts/smoke-test.sh ./build/${{ env.BUILD_TYPE }}/ect.exe
+
+  mingw:
+    name: windows-msys2
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-libwebp
+
+      - name: Configure
+        run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Smoke test
+        run: bash .github/scripts/smoke-test.sh ./build/ect.exe
