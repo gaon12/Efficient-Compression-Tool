@@ -155,8 +155,13 @@ set(ZLIB_LIBRARY zlib CACHE STRING "Bundled zlib target" FORCE)
 # export rules (they cannot export a dependency on the bundled zlib target).
 set(SKIP_INSTALL_ALL ON)
 add_subdirectory(zopfli EXCLUDE_FROM_ALL)
-file(COPY ${CMAKE_SOURCE_DIR}/pngusr.h DESTINATION ${CMAKE_SOURCE_DIR}/libpng/)
 add_subdirectory(optipng EXCLUDE_FROM_ALL)
+# libpng is built with PNG_USER_CONFIG, so pngpriv.h includes "pngusr.h".
+# Provide it through an include directory in the build tree instead of
+# copying it into the libpng submodule, which left the submodule dirty after
+# every configure.
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/pngusr.h DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/pngusr)
+target_include_directories(png_static PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/pngusr)
 # Mozjpeg changes the install prefix if it thinks the current is defaulted
 set(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT FALSE)
 add_subdirectory(mozjpeg EXCLUDE_FROM_ALL)
