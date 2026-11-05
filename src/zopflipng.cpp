@@ -454,7 +454,7 @@ static void TryPaletteOrders(const unsigned char* image, size_t imagesize, unsig
   for (size_t i = 0; i < n; i++) identity[i] = i;
   orders.push_back(identity);
   orders.push_back(palette_order::Luma(ref.palette, n, idx.data(), w, h));
-  orders.push_back(palette_order::Ezeng(matrix, 1, pixels));
+  orders.push_back(palette_order::Ezeng(matrix, 50, pixels));
   orders.push_back(palette_order::Battiato(matrix));
   /* The palette order of the input file, which may already be a good one. */
   if (input.colortype == LCT_PALETTE) {

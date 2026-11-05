@@ -141,8 +141,66 @@ inline void PairwiseSwap(std::vector<size_t>& r, const CoOccurrence& m, size_t m
   }
 }
 
+/* Move single colors to the position where they lower the total weight *
+   distance cost most, until no move helps (not in oxipng). Moving x one step
+   past its neighbour y changes the cost by (L_x - L_y) - (R_x - R_y) when x
+   is on the left, where L and R sum the weights to the colors left and right
+   of the pair, so every target position of x is evaluated in O(n). */
+inline void InsertionRefine(std::vector<size_t>& r, const CoOccurrence& m, unsigned max_passes) {
+  const size_t n = r.size();
+  std::vector<int64_t> left(n), total(n), pre(n + 1);
+  auto recompute = [&]() {
+    for (size_t p = 0; p < n; p++) {
+      const uint32_t* row = m.row(r[p]);
+      int64_t l = 0, t = 0;
+      for (size_t q = 0; q < n; q++) {
+        if (q == p) continue;
+        t += row[r[q]];
+        if (q < p) l += row[r[q]];
+      }
+      left[p] = l;
+      total[p] = t;
+    }
+  };
+  recompute();
+  for (unsigned pass = 0; pass < max_passes; pass++) {
+    bool moved = false;
+    for (size_t a = 0; a < n; a++) {
+      const size_t x = r[a];
+      const uint32_t* wx = m.row(x);
+      pre[0] = 0;
+      for (size_t q = 0; q < n; q++) pre[q + 1] = pre[q] + (q == a ? 0 : wx[r[q]]);
+      int64_t delta = 0, best = 0;
+      size_t target = a;
+      for (size_t q = a + 1; q < n; q++) {  // x moves right past r[q]
+        int64_t wxy = wx[r[q]];
+        int64_t lx = pre[q], rx = total[a] - lx - wxy;
+        int64_t ly = left[q] - wxy, ry = total[q] - left[q];
+        delta += (lx - ly) - (rx - ry);
+        if (delta < best) { best = delta; target = q; }
+      }
+      delta = 0;
+      for (size_t q = a; q-- > 0;) {  // x moves left past r[q]
+        int64_t wxy = wx[r[q]];
+        int64_t lx = pre[q], rx = total[a] - lx - wxy;
+        int64_t ly = left[q], ry = total[q] - left[q] - wxy;
+        delta += (ly - lx) - (ry - rx);
+        if (delta < best) { best = delta; target = q; }
+      }
+      if (target != a) {
+        if (target > a) std::rotate(r.begin() + a, r.begin() + a + 1, r.begin() + target + 1);
+        else std::rotate(r.begin() + target, r.begin() + a, r.begin() + a + 1);
+        recompute();
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+}
+
 /* Zeng's reindexing (Pinho et al.), inserting each color where it adds the
-   least cost instead of only at the ends, then refined by pairwise swaps. */
+   least cost instead of only at the ends, then refined by pairwise swaps and
+   single color moves. */
 inline std::vector<size_t> Ezeng(const CoOccurrence& m, size_t max_swap_dist, size_t pixels) {
   std::vector<size_t> r;
   if (m.edges.empty()) return r;
@@ -192,6 +250,8 @@ inline std::vector<size_t> Ezeng(const CoOccurrence& m, size_t max_swap_dist, si
       }
     }
   }
+  PairwiseSwap(r, m, max_swap_dist);
+  InsertionRefine(r, m, 50);
   PairwiseSwap(r, m, max_swap_dist);
   MostPopularFirst(r, m, pixels * 3 / 20);
   return r;
