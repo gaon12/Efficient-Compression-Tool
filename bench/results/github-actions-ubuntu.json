@@ -1,0 +1,554 @@
+{
+  "meta": {
+    "label": "ubuntu-latest (GitHub Actions)",
+    "system": "Linux",
+    "release": "7.0.0-1017-azure",
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "cpus": 4,
+    "python": "3.12.15"
+  },
+  "results": [
+    {
+      "workload": "gzip",
+      "level": 1,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 729025,
+      "seconds": 0.06704247900006521,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 1,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 864841,
+      "seconds": 0.025991877000024033,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 1,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 816949,
+      "seconds": 0.014289068000039151,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 729025,
+      "seconds": 0.027311508000025242,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 864841,
+      "seconds": 0.012532870999962142,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 816949,
+      "seconds": 0.007549674999950184,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 3,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 688154,
+      "seconds": 0.48805133500002285,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 3,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 787320,
+      "seconds": 0.03580612799999017,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 3,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 771260,
+      "seconds": 0.01677770200001305,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 691931,
+      "seconds": 0.25672914599999785,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 787320,
+      "seconds": 0.01899511600004189,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 771260,
+      "seconds": 0.008027866000020367,
+      "runs": 5
+    },
+    {
+      "workload": "gzip",
+      "level": 9,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 673320,
+      "seconds": 6.428184571000088,
+      "runs": 1
+    },
+    {
+      "workload": "gzip",
+      "level": 9,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 727997,
+      "seconds": 0.38206449200004045,
+      "runs": 1
+    },
+    {
+      "workload": "gzip",
+      "level": 9,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 729130,
+      "seconds": 0.19625433799990333,
+      "runs": 1
+    },
+    {
+      "workload": "gzip",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 673320,
+      "seconds": 3.298485053000036,
+      "runs": 1
+    },
+    {
+      "workload": "gzip",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 727997,
+      "seconds": 0.29549038400000427,
+      "runs": 1
+    },
+    {
+      "workload": "gzip",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 729130,
+      "seconds": 0.1591735060000019,
+      "runs": 1
+    },
+    {
+      "workload": "zip",
+      "level": 1,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 729770,
+      "seconds": 0.06453260499995395,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 1,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 865784,
+      "seconds": 0.024941445999957068,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 1,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 817694,
+      "seconds": 0.015273815000000468,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 729770,
+      "seconds": 0.06275018300004831,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 865784,
+      "seconds": 0.024424661000011838,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 817694,
+      "seconds": 0.015133007000031284,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 3,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 688899,
+      "seconds": 0.49696418799999265,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 3,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 788263,
+      "seconds": 0.03443499599995903,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 3,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 772005,
+      "seconds": 0.017865256000050067,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 688899,
+      "seconds": 0.4924914839999701,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 788263,
+      "seconds": 0.03427565599997706,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 772005,
+      "seconds": 0.0176577830000042,
+      "runs": 5
+    },
+    {
+      "workload": "zip",
+      "level": 9,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 674065,
+      "seconds": 6.23564485899999,
+      "runs": 1
+    },
+    {
+      "workload": "zip",
+      "level": 9,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 728940,
+      "seconds": 0.3925550139999814,
+      "runs": 1
+    },
+    {
+      "workload": "zip",
+      "level": 9,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 729875,
+      "seconds": 0.20325943300008475,
+      "runs": 1
+    },
+    {
+      "workload": "zip",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 2810784,
+      "output_bytes": 674065,
+      "seconds": 6.413516086999948,
+      "runs": 1
+    },
+    {
+      "workload": "zip",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 2810784,
+      "output_bytes": 728940,
+      "seconds": 0.4062008649999598,
+      "runs": 1
+    },
+    {
+      "workload": "zip",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 2810784,
+      "output_bytes": 729875,
+      "seconds": 0.20952439199993478,
+      "runs": 1
+    },
+    {
+      "workload": "png",
+      "level": 1,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 1082696,
+      "output_bytes": 535841,
+      "seconds": 0.18921495400002186,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 1,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 1082696,
+      "output_bytes": 534530,
+      "seconds": 0.09921968599996944,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 1,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 1082696,
+      "output_bytes": 542777,
+      "seconds": 0.029999235999980556,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 1082696,
+      "output_bytes": 535841,
+      "seconds": 0.14982595300000412,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 1082696,
+      "output_bytes": 534530,
+      "seconds": 0.06841661299995394,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 1,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 1082696,
+      "output_bytes": 542777,
+      "seconds": 0.02068910999992113,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 3,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 1082696,
+      "output_bytes": 498485,
+      "seconds": 0.4830334790000279,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 3,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 1082696,
+      "output_bytes": 534530,
+      "seconds": 0.09924645499995677,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 3,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 1082696,
+      "output_bytes": 518839,
+      "seconds": 0.08538894399998753,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 1082696,
+      "output_bytes": 498485,
+      "seconds": 0.2993678219999083,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 1082696,
+      "output_bytes": 534530,
+      "seconds": 0.06583016599995517,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 3,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 1082696,
+      "output_bytes": 518839,
+      "seconds": 0.05902575800007526,
+      "runs": 5
+    },
+    {
+      "workload": "png",
+      "level": 9,
+      "mode": "single",
+      "impl": "cpp",
+      "input_bytes": 1082696,
+      "output_bytes": 484206,
+      "seconds": 4.016900257999964,
+      "runs": 1
+    },
+    {
+      "workload": "png",
+      "level": 9,
+      "mode": "single",
+      "impl": "go",
+      "input_bytes": 1082696,
+      "output_bytes": 534530,
+      "seconds": 0.0934462220000114,
+      "runs": 1
+    },
+    {
+      "workload": "png",
+      "level": 9,
+      "mode": "single",
+      "impl": "rust",
+      "input_bytes": 1082696,
+      "output_bytes": 515343,
+      "seconds": 0.5695574350000925,
+      "runs": 1
+    },
+    {
+      "workload": "png",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "cpp",
+      "input_bytes": 1082696,
+      "output_bytes": 484206,
+      "seconds": 1.9111763349999364,
+      "runs": 1
+    },
+    {
+      "workload": "png",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "go",
+      "input_bytes": 1082696,
+      "output_bytes": 534530,
+      "seconds": 0.06358009799998854,
+      "runs": 1
+    },
+    {
+      "workload": "png",
+      "level": 9,
+      "mode": "parallel",
+      "impl": "rust",
+      "input_bytes": 1082696,
+      "output_bytes": 515343,
+      "seconds": 0.42422018799993566,
+      "runs": 1
+    }
+  ]
+}
