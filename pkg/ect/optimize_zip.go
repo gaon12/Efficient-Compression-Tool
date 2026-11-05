@@ -53,6 +53,9 @@ func optimizeExistingZIP(path string, info os.FileInfo, cfg Config) (before, aft
 		_ = os.Remove(tempName)
 		return 0, 0, false, err
 	}
+	// Release the source archive before the rename below: Windows refuses
+	// to replace a file that is still open ("Access is denied").
+	_ = zr.Close()
 
 	newInfo, err := os.Stat(tempName)
 	if err != nil {

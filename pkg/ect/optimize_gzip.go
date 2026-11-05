@@ -65,6 +65,10 @@ func optimizeExistingGzip(path string, info os.FileInfo, cfg Config) (before, af
 
 	_, copyErr := io.Copy(zw, zr)
 	closeReadErr := zr.Close()
+	// Release the source handle before the rename below: Windows refuses to
+	// replace a file that is still open ("Access is denied"). The deferred
+	// Close then becomes a harmless no-op.
+	_ = in.Close()
 	closeWriteErr := zw.Close()
 	if copyErr != nil {
 		cleanup()
