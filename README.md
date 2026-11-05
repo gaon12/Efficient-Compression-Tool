@@ -66,6 +66,26 @@ implementation (for example the C/C++ version also supports
   on Linux, macOS and Windows and benchmarks them on identical inputs,
 - [`doc/Manual.docx`](doc/Manual.docx), the original user manual.
 
+## Which one should I use?
+
+Measured with `bench/bench.py` on one laptop (Intel Core Ultra 5 325),
+default level `-3`, one file at a time, Linux (WSL2) / Windows 11 native.
+Sizes are identical on both systems:
+
+| Workload | C/C++ | Go | Rust |
+| -------- | ----- | -- | ---- |
+| gzip, Canterbury Corpus (2.81 MB) | **688,154 B**, 1.19 s / 1.58 s | 787,320 B, 0.062 s / 0.23 s | 771,260 B, **0.035 s / 0.14 s** |
+| ZIP re-optimization (2.81 MB stored) | **688,899 B**, 1.25 s / 1.75 s | 788,263 B, 0.11 s / 0.42 s | 772,005 B, **0.06 s / 0.12 s** |
+| PNG re-optimization (1.08 MB) | **498,485 B**, 1.41 s / 1.25 s | 534,530 B, 0.19 s / 0.29 s | 518,839 B, **0.15 s / 0.27 s** |
+
+- Smallest files, time is no concern: **C/C++** (`cpp`).
+- Fast optimization with good results, simple builds: **Rust** (`rust`).
+- Embedding in a Go program, or a dependency-free Go toolchain build:
+  **Go** (`go`).
+
+Full tables for levels 1, 3 and 9, single and parallel workers, are in
+[bench/results/RESULTS.md](bench/results/RESULTS.md).
+
 ## License
 
 ECT is licensed under the Apache License 2.0 (see `License.txt`). The
