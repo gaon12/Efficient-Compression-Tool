@@ -68,23 +68,33 @@ implementation (for example the C/C++ version also supports
 
 ## Which one should I use?
 
-Measured with `bench/bench.py` on one laptop (Intel Core Ultra 5 325),
-default level `-3`, one file at a time, Linux (WSL2) / Windows 11 native.
-Sizes are identical on both systems:
+Measured with `bench/bench.py` by the `benchmark` workflow on GitHub
+Actions runners, default level `-3`, one file at a time. Output sizes are
+identical on every OS:
 
-| Workload | C/C++ | Go | Rust |
-| -------- | ----- | -- | ---- |
-| gzip, Canterbury Corpus (2.81 MB) | **688,154 B**, 1.19 s / 1.58 s | 787,320 B, 0.062 s / 0.23 s | 771,260 B, **0.035 s / 0.14 s** |
-| ZIP re-optimization (2.81 MB stored) | **688,899 B**, 1.25 s / 1.75 s | 788,263 B, 0.11 s / 0.42 s | 772,005 B, **0.06 s / 0.12 s** |
-| PNG re-optimization (1.08 MB) | **498,485 B**, 1.41 s / 1.25 s | 534,530 B, 0.19 s / 0.29 s | 518,839 B, **0.15 s / 0.27 s** |
+| Workload | C/C++ size | Go size | Rust size |
+| -------- | ---------- | ------- | --------- |
+| gzip, Canterbury Corpus (2.81 MB) | **688,154 B** | 787,320 B | 771,260 B |
+| ZIP re-optimization (2.81 MB stored) | **688,899 B** | 788,263 B | 772,005 B |
+| PNG re-optimization (1.08 MB) | **498,485 B** | 534,530 B | 518,839 B |
 
-- Smallest files, time is no concern: **C/C++** (`cpp`).
+Wall time, C/C++ / Go / Rust:
+
+| Workload | Linux (x86-64) | macOS (Apple M2 Pro) | Windows (x86-64) |
+| -------- | -------------- | -------------------- | ---------------- |
+| gzip | 0.49 s / 36 ms / **17 ms** | 0.57 s / 44 ms / **24 ms** | 0.71 s / 0.21 s / **49 ms** |
+| ZIP  | 0.50 s / 34 ms / **18 ms** | 0.58 s / 38 ms / **20 ms** | 0.72 s / 51 ms / **29 ms** |
+| PNG  | 0.48 s / 99 ms / **85 ms** | 0.56 s / 0.12 s / **0.10 s** | 0.67 s / 0.13 s / **0.11 s** |
+
+- Smallest files, time is no concern: **C/C++** (`cpp`). If you use `-9`
+  on a CPU with AVX2, build it with `-DECT_X86_64_V3=ON` (~30% faster).
 - Fast optimization with good results, simple builds: **Rust** (`rust`).
 - Embedding in a Go program, or a dependency-free Go toolchain build:
   **Go** (`go`).
 
-Full tables for levels 1, 3 and 9, single and parallel workers, are in
-[bench/results/RESULTS.md](bench/results/RESULTS.md).
+Full tables for levels 1, 3 and 9, single and parallel workers, results
+from a local laptop, and a comparison of compiler/build optimizations are
+in [bench/results/RESULTS.md](bench/results/RESULTS.md).
 
 ## License
 
