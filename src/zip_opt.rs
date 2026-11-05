@@ -1,14 +1,12 @@
 use std::fs::{self, File, Metadata};
-use std::io::{self, BufReader, Read, Seek, Write};
+use std::io::{self, BufReader, Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use flate2::write::DeflateEncoder;
 use zip::write::{FileOptionExtension, FileOptions, SimpleFileOptions};
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use crate::config::Config;
-use crate::gzip::compression;
 use crate::processor::Outcome;
 use crate::replace::{TempFile, parent_dir};
 
@@ -79,12 +77,10 @@ fn copy_entry<R: Read + Seek, W: Write + Seek>(
 
     let mut data = Vec::with_capacity(entry.size().min(1 << 30) as usize);
     entry.read_to_end(&mut data)?;
-    let method = choose_zip_method(&data, entry.compression(), cfg)?;
+    let allow_deflate = may_deflate(data.len(), entry.compression(), cfg);
     drop(entry);
 
-    let options = apply_method(options, method, cfg, data.len() as u64);
-    writer.start_file(name, options).map_err(zip_err)?;
-    writer.write_all(&data)
+    write_entry(writer, &name, options, &data, allow_deflate, cfg)
 }
 
 fn apply_method<'k, 'n, T: FileOptionExtension>(
@@ -202,56 +198,78 @@ fn add_file<W: Write + Seek>(
 ) -> io::Result<u64> {
     let data = fs::read(src)?;
     let meta = fs::metadata(src)?;
-    let method = choose_zip_method(&data, CompressionMethod::Deflated, cfg)?;
-    let mut options =
-        SimpleFileOptions::default().last_modified_time(to_zip_time(meta.modified().ok()));
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        options = options.unix_permissions(meta.permissions().mode() & 0o7777);
-    }
-    options = apply_method(options, method, cfg, data.len() as u64);
-    writer.start_file(name, options).map_err(zip_err)?;
-    writer.write_all(&data)?;
+    let options = file_permissions(
+        SimpleFileOptions::default().last_modified_time(to_zip_time(meta.modified().ok())),
+        &meta,
+    );
+    let allow_deflate = may_deflate(data.len(), CompressionMethod::Deflated, cfg);
+    write_entry(writer, name, options, &data, allow_deflate, cfg)?;
     Ok(data.len() as u64)
 }
 
-pub(crate) fn choose_zip_method(
-    data: &[u8],
-    original: CompressionMethod,
-    cfg: &Config,
-) -> io::Result<CompressionMethod> {
-    if data.len() < 64 {
-        return Ok(CompressionMethod::Stored);
+/// Records the Unix permission bits of a packed file (no-op elsewhere).
+#[cfg(unix)]
+fn file_permissions(options: SimpleFileOptions, meta: &Metadata) -> SimpleFileOptions {
+    use std::os::unix::fs::PermissionsExt;
+    options.unix_permissions(meta.permissions().mode() & 0o7777)
+}
+
+#[cfg(not(unix))]
+fn file_permissions(options: SimpleFileOptions, _meta: &Metadata) -> SimpleFileOptions {
+    options
+}
+
+/// Entries smaller than this are always stored: the deflate framing
+/// overhead cannot pay off for such tiny inputs.
+const MIN_DEFLATE_SIZE: usize = 64;
+
+/// Whether an entry originally written with `original` may be (re)written
+/// with Deflate:
+/// - tiny entries are always stored,
+/// - stored entries stay stored in strict mode,
+/// - entries using other methods are stored after decompression.
+pub(crate) fn may_deflate(size: usize, original: CompressionMethod, cfg: &Config) -> bool {
+    if size < MIN_DEFLATE_SIZE {
+        return false;
     }
-    let try_deflate = match original {
+    match original {
         CompressionMethod::Stored => !cfg.strict,
         CompressionMethod::Deflated => true,
         _ => false,
-    };
-    if try_deflate && deflated_size(data, cfg.level)? < data.len() as u64 {
-        Ok(CompressionMethod::Deflated)
-    } else {
-        Ok(CompressionMethod::Stored)
     }
 }
 
-struct CountingWriter(u64);
-
-impl Write for CountingWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0 += buf.len() as u64;
-        Ok(buf.len())
+/// Writes `data` as one entry, compressing it at most once.
+///
+/// The data is deflated into a single-entry in-memory archive. If that is
+/// smaller than the input, the compressed entry is copied into `writer`
+/// with `raw_copy_file` (no second compression pass); otherwise the entry
+/// is stored. The previous implementation deflated every entry twice: once
+/// to measure the size and once more inside `ZipWriter`.
+fn write_entry<W: Write + Seek, T: FileOptionExtension + Clone>(
+    writer: &mut ZipWriter<W>,
+    name: &str,
+    options: FileOptions<'_, '_, T>,
+    data: &[u8],
+    allow_deflate: bool,
+    cfg: &Config,
+) -> io::Result<()> {
+    let size = data.len() as u64;
+    if allow_deflate {
+        let deflated = apply_method(options.clone(), CompressionMethod::Deflated, cfg, size);
+        let mut staging = ZipWriter::new(Cursor::new(Vec::with_capacity(data.len() / 2 + 256)));
+        staging.start_file(name, deflated).map_err(zip_err)?;
+        staging.write_all(data)?;
+        let mut staged = ZipArchive::new(staging.finish().map_err(zip_err)?).map_err(zip_err)?;
+        let entry = staged.by_index_raw(0).map_err(zip_err)?;
+        if entry.compressed_size() < size {
+            return writer.raw_copy_file(entry).map_err(zip_err);
+        }
     }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
 
-fn deflated_size(data: &[u8], level: u32) -> io::Result<u64> {
-    let mut enc = DeflateEncoder::new(CountingWriter(0), compression(level));
-    enc.write_all(data)?;
-    Ok(enc.finish()?.0)
+    let stored = apply_method(options, CompressionMethod::Stored, cfg, size);
+    writer.start_file(name, stored).map_err(zip_err)?;
+    writer.write_all(data)
 }
 
 /// Converts a timestamp to a ZIP (MS-DOS, UTC) date/time.
@@ -300,24 +318,48 @@ mod tests {
     }
 
     #[test]
-    fn method_choice() {
+    fn deflate_eligibility() {
         let cfg = Config::default();
-        let compressible = vec![b'a'; 1000];
-        assert_eq!(
-            choose_zip_method(b"tiny", CompressionMethod::Deflated, &cfg).unwrap(),
-            CompressionMethod::Stored
-        );
-        assert_eq!(
-            choose_zip_method(&compressible, CompressionMethod::Stored, &cfg).unwrap(),
-            CompressionMethod::Deflated
-        );
         let strict = Config {
             strict: true,
             ..Config::default()
         };
+        assert!(!may_deflate(10, CompressionMethod::Deflated, &cfg));
+        assert!(may_deflate(1000, CompressionMethod::Stored, &cfg));
+        assert!(!may_deflate(1000, CompressionMethod::Stored, &strict));
+        assert!(may_deflate(1000, CompressionMethod::Deflated, &strict));
+    }
+
+    fn write_one(data: &[u8], allow_deflate: bool) -> (CompressionMethod, Vec<u8>) {
+        let mut w = ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = SimpleFileOptions::default();
+        write_entry(&mut w, "x", opts, data, allow_deflate, &Config::default()).unwrap();
+        let mut ar = ZipArchive::new(w.finish().unwrap()).unwrap();
+        let mut f = ar.by_index(0).unwrap();
+        let mut out = Vec::new();
+        f.read_to_end(&mut out).unwrap();
+        (f.compression(), out)
+    }
+
+    #[test]
+    fn write_entry_deflates_only_when_smaller() {
+        let text = vec![b'a'; 4096];
         assert_eq!(
-            choose_zip_method(&compressible, CompressionMethod::Stored, &strict).unwrap(),
-            CompressionMethod::Stored
+            write_one(&text, true),
+            (CompressionMethod::Deflated, text.clone())
         );
+        assert_eq!(write_one(&text, false), (CompressionMethod::Stored, text));
+
+        // Pseudo-random bytes do not compress and must be stored.
+        let mut x = 0x2545_f491_u32;
+        let noise: Vec<u8> = (0..4096)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x as u8
+            })
+            .collect();
+        assert_eq!(write_one(&noise, true), (CompressionMethod::Stored, noise));
     }
 }
