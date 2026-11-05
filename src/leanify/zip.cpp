@@ -115,6 +115,8 @@ struct ParsedCDHeader {
   uint64_t compressed_size;
   uint64_t uncompressed_size;
   uint64_t local_header_offset;
+  // Entry comment, kept unless metadata is stripped.
+  std::string comment;
 };
 
 bool FitsSizeT(uint64_t value) {
@@ -345,7 +347,8 @@ bool GetCDHeaders(const uint8_t* fp, size_t size, uint64_t cd_offset, uint64_t c
     parsed.compressed_size = compressed_size;
     parsed.uncompressed_size = uncompressed_size;
     parsed.local_header_offset = local_header_offset;
-    cd_headers.push_back(parsed);
+    parsed.comment.assign(reinterpret_cast<const char*>(p_comment), cd_header.comment_len);
+    cd_headers.push_back(std::move(parsed));
   }
 
   std::sort(cd_headers.begin(), cd_headers.end(),
@@ -504,6 +507,17 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
     }
   }
 
+  // Archive comment (after the EOCD record), kept unless metadata is
+  // stripped. Copied now because the archive is rewritten in place.
+  std::string archive_comment;
+  if (!Options.strip) {
+    EOCD eocd_in;
+    memcpy(&eocd_in, p_eocd, sizeof(eocd_in));
+    const uint8_t* p_comment = p_eocd + sizeof(EOCD);
+    const size_t available = static_cast<size_t>(fp_ + size_ - p_comment);
+    archive_comment.assign(reinterpret_cast<const char*>(p_comment), std::min<size_t>(eocd_in.comment_len, available));
+  }
+
   uint8_t* fp_w = fp_;
   uint8_t* fp_w_base = fp_w + base_offset;
   memmove(fp_w, fp_, zip_offset);
@@ -558,7 +572,9 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
     }
 
     memcpy(p_write, &local_header_out, sizeof(LocalHeader));
-    memcpy(p_write + sizeof(LocalHeader), p_read_header + sizeof(LocalHeader), local_header_out.filename_len);
+    // The archive is rewritten in place and p_write trails p_read_header, so
+    // the file name ranges may overlap once earlier entries have shrunk.
+    memmove(p_write + sizeof(LocalHeader), p_read_header + sizeof(LocalHeader), local_header_out.filename_len);
 
     LocalHeader* local_header = reinterpret_cast<LocalHeader*>(p_write);
     string filename(reinterpret_cast<char*>(p_write) + sizeof(LocalHeader), local_header->filename_len);
@@ -571,9 +587,23 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
     uint32_t final_crc = cd_header.header.crc32;
 
     // If the method is store, Leanify the embedded file and try deflate recompression in non-strict mode.
+    // A stored entry is only rewritten when its data matches the recorded
+    // CRC and size; otherwise the recomputed CRC would silently turn a
+    // damaged entry into a "valid" one. Such entries are copied unchanged.
+    bool stored_entry_valid = false;
+    if (local_header->compression_method == 0 && cd_header.compressed_size != 0 &&
+        cd_header.compressed_size <= kUint32Max) {
+      stored_entry_valid =
+          cd_header.compressed_size == cd_header.uncompressed_size &&
+          crc32(0, p_read_data, static_cast<uInt>(cd_header.compressed_size)) == cd_header.header.crc32;
+      if (!stored_entry_valid) {
+        cerr << filename << ": CRC32 or size mismatch in stored entry, copying it unchanged." << endl;
+      }
+    }
+
     if (local_header->compression_method == 0) {
       if (cd_header.compressed_size != 0) {
-        if (!Options.Strict && cd_header.compressed_size <= kUint32Max) {
+        if (!Options.Strict && stored_entry_valid) {
           uint32_t new_uncomp_size =
               RecompressFile(p_read_data, static_cast<uint32_t>(cd_header.compressed_size),
                              static_cast<uint32_t>(p_read_data - entry_data_write), filename, Options);
@@ -719,7 +749,8 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
   const uint64_t cd_offset64 = static_cast<uint64_t>(p_write - fp_w_base);
   for (ParsedCDHeader& cd_header : cd_headers) {
     CDHeader cd_out = cd_header.header;
-    cd_out.comment_len = 0;
+    const std::string& entry_comment = Options.strip ? std::string() : cd_header.comment;
+    cd_out.comment_len = static_cast<uint16_t>(entry_comment.size());
     cd_out.disk_file_start = 0;
 
     uint8_t cd_zip64_extra[4 + 24];
@@ -779,6 +810,8 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
       memcpy(p_write, cd_zip64_extra, cd_zip64_extra_len);
       p_write += cd_zip64_extra_len;
     }
+    memcpy(p_write, entry_comment.data(), entry_comment.size());
+    p_write += entry_comment.size();
   }
 
   const uint64_t cd_size64 = static_cast<uint64_t>(p_write - fp_w_base) - cd_offset64;
@@ -816,9 +849,10 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
   eocd.num_records_total = need_zip64_archive ? kUint16Max : static_cast<uint16_t>(total_records);
   eocd.cd_size = need_zip64_archive ? kUint32Max : static_cast<uint32_t>(cd_size64);
   eocd.cd_offset = need_zip64_archive ? kUint32Max : static_cast<uint32_t>(cd_offset64);
-  eocd.comment_len = 0;
+  eocd.comment_len = static_cast<uint16_t>(archive_comment.size());
   memcpy(p_write, &eocd, sizeof(EOCD));
+  memcpy(p_write + sizeof(EOCD), archive_comment.data(), archive_comment.size());
 
-  size_ = p_write + sizeof(EOCD) - fp_;
+  size_ = p_write + sizeof(EOCD) + archive_comment.size() - fp_;
   return size_;
 }
