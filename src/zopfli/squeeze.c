@@ -38,6 +38,13 @@ Author: jyrki.alakuijala@gmail.com (Jyrki Alakuijala)
 #include "../LzFind.h"
 #include "../threadLocal.h"
 
+/* Intrinsics for squeeze.simd.insert.c */
+#if defined(__AVX2__) || defined(__SSE4_2__)
+#include <immintrin.h>
+#elif defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 static void CopyStats(const SymbolStats* source, SymbolStats* dest) {
   memcpy(dest->litlens, source->litlens, 288 * sizeof(dest->litlens[0]));
   memcpy(dest->dists, source->dists, 32 * sizeof(dest->dists[0]));
@@ -370,6 +377,14 @@ static void GetBestLengths2(const unsigned char* in, size_t instart, size_t inen
           unsigned dist = *mp++;
           float price2 = price + disttable[dist];
           dist <<=9;
+#include "squeeze.simd.insert.c"
+          /* The scalar tail must not be auto-vectorized: compilers produce
+             slower code for it than the explicit version above. */
+#if defined(__clang__)
+#pragma clang loop vectorize(disable)
+#elif defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC novector
+#endif
           for (; curr <= len; curr++) {
             float x = price2 + litlentable[curr];
             if (x < costs[j + curr]){
@@ -641,6 +656,14 @@ static void GetBestLengths(const ZopfliOptions* options, const unsigned char* in
             curr = len + 1;
             continue;
           }
+#include "squeeze.simd.insert.c"
+          /* The scalar tail must not be auto-vectorized: compilers produce
+             slower code for it than the explicit version above. */
+#if defined(__clang__)
+#pragma clang loop vectorize(disable)
+#elif defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC novector
+#endif
           for (; curr <= len; curr++) {
             float x = price2 + litlentable[curr];
             if (x < costs[j + curr]){
