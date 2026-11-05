@@ -35,7 +35,7 @@ All of them share the same command line interface.
 | JPEG   | Removal of APPn/COM metadata segments with `-strip`; pixel data untouched |
 | WebP   | Detected and parsed; animated WebP is skipped; no re-encode |
 | GZIP   | Re-compress existing `.gz` (header kept); `-gzip` creates `<file>.gz` |
-| ZIP    | Re-deflate entries (stored entries become deflated unless `--strict`); `-zip` creates `<path>.zip` |
+| ZIP    | Re-deflate entries (stored entries become deflated unless `--strict`); `-zip` creates `<path>.zip` for files and directories and re-optimizes existing archives in place |
 
 ## CLI
 
@@ -49,7 +49,7 @@ ect [options] files/folders...
 | `-strip` | Strip metadata where the format allows |
 | `-recurse` | Recursively process directories |
 | `-gzip` | Optimize `.gz` files and compress other files to `<file>.gz` |
-| `-zip` | Create `<path>.zip` for every given file or directory |
+| `-zip` | Create `<path>.zip` for every given file or directory; existing ZIP archives are re-optimized in place (same as the C/C++ version) |
 | `-keep` | Keep the original modification time |
 | `-quiet` | Print only errors |
 | `--disable-png`, `--disable-jpg`, `--disable-webp` | Skip a format |
