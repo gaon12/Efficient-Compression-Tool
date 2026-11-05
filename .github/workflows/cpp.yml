@@ -94,6 +94,7 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-libwebp
+            diffutils
 
       - name: Configure
         run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
