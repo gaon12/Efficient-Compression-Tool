@@ -130,10 +130,6 @@ endif()
 # Enable ZLIB_CONST for everything
 add_definitions(-DZLIB_CONST)
 
-# Ensure that zlib target points to our custom zlib zlib
-set(ZLIB_ROOT "zlib/")
-find_package(ZLIB)
-
 option(ECT_MULTITHREADING "Enable multithreaded processing support" ON)
 option(ECT_MP3_SUPPORT "Enable MP3 support (not currently working)" OFF)
 option(ECT_WEBP_SUPPORT "Enable WebP optimization support" ON)
@@ -142,6 +138,22 @@ add_subdirectory(leanify EXCLUDE_FROM_ALL)
 add_subdirectory(lodepng EXCLUDE_FROM_ALL)
 add_subdirectory(miniz EXCLUDE_FROM_ALL)
 add_subdirectory(zlib EXCLUDE_FROM_ALL)
+
+# libpng calls find_package(ZLIB REQUIRED). Without intervention CMake's
+# FindZLIB locates the *system* zlib: on Linux/macOS libpng was silently
+# linked against it instead of the bundled, optimized copy, and on Windows,
+# where there is usually no system zlib, configuration failed outright.
+# Expose the bundled `zlib` target as ZLIB::ZLIB (FindZLIB keeps an existing
+# target) and pre-seed the cache variables FindZLIB checks, so every
+# find_package(ZLIB) call resolves to the bundled library.
+target_include_directories(zlib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/zlib)
+add_library(ZLIB::ZLIB ALIAS zlib)
+set(ZLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/zlib CACHE PATH "Bundled zlib headers" FORCE)
+set(ZLIB_LIBRARY zlib CACHE STRING "Bundled zlib target" FORCE)
+
+# The bundled libpng is only linked statically into ect; skip its install and
+# export rules (they cannot export a dependency on the bundled zlib target).
+set(SKIP_INSTALL_ALL ON)
 add_subdirectory(zopfli EXCLUDE_FROM_ALL)
 file(COPY ${CMAKE_SOURCE_DIR}/pngusr.h DESTINATION ${CMAKE_SOURCE_DIR}/libpng/)
 add_subdirectory(optipng EXCLUDE_FROM_ALL)
