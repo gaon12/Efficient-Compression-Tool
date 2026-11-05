@@ -1,0 +1,175 @@
+# Compares the C/C++ implementation of this repository with the community
+# fork clevert-app/ect on the same runner and inputs.
+#
+# - ours-portable: the cpp branch, release configuration
+# - ours-v3:       the cpp branch with -DECT_X86_64_V3=ON (x86-64 only)
+# - clevert-nightly: the published clevert nightly binary
+# - clevert-head:  clevert master built from source (-O3, ThinLTO)
+#
+# clevert has a different command line, so it runs through
+# bench/clevert-wrap.sh (a few ms of shell overhead per call). Shared
+# runners are noisy: compare binaries within one job only.
+name: compare-clevert
+
+on:
+  workflow_dispatch:
+    inputs:
+      clevert_ref:
+        description: 'clevert-app/ect commit or branch to build'
+        required: false
+        default: 'master'
+      levels:
+        description: 'Comma separated levels for bench.py (2-9)'
+        required: false
+        default: '2,3,6,9'
+
+permissions:
+  contents: read
+
+env:
+  CORPUS_URL: https://corpus.canterbury.ac.nz/resources/cantrbry.zip
+  ENWIK_URL: https://mattmahoney.net/dc/enwik8.zip
+  CLEVERT_REF: ${{ inputs.clevert_ref || 'master' }}
+  LEVELS: ${{ inputs.levels || '2,3,6,9' }}
+
+jobs:
+  compare:
+    name: compare-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            nightly: linux-x64_20261102-1733.zip
+          - os: macos-latest
+            nightly: mac-arm64_20261102-1734.zip
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: hub
+
+      - uses: actions/checkout@v4
+        with:
+          ref: cpp
+          path: cpp
+          submodules: recursive
+
+      - uses: actions/checkout@v4
+        with:
+          repository: clevert-app/ect
+          ref: ${{ env.CLEVERT_REF }}
+          path: clevert
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm ninja-build clang lld llvm
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm ninja
+
+      - name: Build ours
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          cmake -S cpp/src -B build-port -G Ninja -DCMAKE_BUILD_TYPE=Release -DECT_WEBP_SUPPORT=OFF
+          cmake --build build-port --parallel
+          cp build-port/ect bin/ours-portable
+          if [ "$(uname -m)" = "x86_64" ]; then
+            cmake -S cpp/src -B build-v3 -G Ninja -DCMAKE_BUILD_TYPE=Release -DECT_WEBP_SUPPORT=OFF -DECT_X86_64_V3=ON
+            cmake --build build-v3 --parallel
+            cp build-v3/ect bin/ours-v3
+          fi
+
+      # Same dependency versions as clevert's scripts/build.sh fetch; libwebp
+      # and libjxl are optional and off by default.
+      - name: Build clevert from source
+        working-directory: clevert/src
+        run: |
+          set -euo pipefail
+          git log -1 --format='clevert %h %ad %s' --date=short
+          fetch() { mkdir -p "third_party/$1"; curl -sSfL "$2" | tar -xz --strip-components 1 -C "third_party/$1"; }
+          fetch zlib-ng https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.3.3.tar.gz
+          fetch libpng https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.59.tar.gz
+          fetch giflib https://deb.debian.org/debian/pool/main/g/giflib/giflib_5.2.2.orig.tar.gz
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export CC=clang CXX=clang++ CFLAGS="-O3 -flto=thin" LDFLAGS="-fuse-ld=lld -Wl,--gc-sections"
+          else
+            export CC=clang CXX=clang++ CFLAGS="-O3 -flto=thin -mcpu=apple-m1" LDFLAGS="-Wl,-dead_strip"
+          fi
+          export CXXFLAGS="$CFLAGS"
+          # ThinLTO objects need an LLVM archiver for the archive index on Linux.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export AR="$(command -v llvm-ar)" RANLIB="$(command -v llvm-ranlib)"
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF               -DCMAKE_AR="$AR" -DCMAKE_RANLIB="$RANLIB"
+          else
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+          fi
+          cmake --build build
+          cp build/ect "$GITHUB_WORKSPACE/bin/clevert-head-bin"
+
+      - name: Download clevert nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v0.0.0-alpha -R clevert-app/ect -p "${{ matrix.nightly }}" -D nightly
+          python -m zipfile -e "nightly/${{ matrix.nightly }}" nightly/x
+          cp "$(find nightly/x -type f -name ect | head -1)" bin/clevert-nightly-bin
+          chmod +x bin/clevert-nightly-bin
+
+      - name: Create clevert wrappers
+        run: |
+          set -euo pipefail
+          for v in nightly head; do
+            printf '#!/bin/bash\nCLEVERT=%s exec %s "$@"\n' \
+              "$PWD/bin/clevert-$v-bin" "$PWD/hub/bench/clevert-wrap.sh" > "bin/clevert-$v"
+            chmod +x "bin/clevert-$v"
+          done
+          chmod +x hub/bench/clevert-wrap.sh
+          bin/ours-portable -help 2>&1 | grep -m1 Version
+          bin/clevert-head-bin --help | grep -E 'Version|Build date'
+          bin/clevert-nightly-bin --help | grep -E 'Version|Build date'
+
+      - name: Download corpora
+        run: |
+          set -euo pipefail
+          curl -sSfL -o cantrbry.zip "$CORPUS_URL"
+          curl -sSfL -o enwik8.zip "$ENWIK_URL"
+          python -m zipfile -e enwik8.zip .
+          head -c 10000000 enwik8 > enwik10m
+
+      - name: Benchmark (Canterbury gzip, ZIP, PNG)
+        run: |
+          set -euo pipefail
+          impls="--impl ours-portable=bin/ours-portable"
+          [ -e bin/ours-v3 ] && impls="$impls --impl ours-v3=bin/ours-v3"
+          impls="$impls --impl clevert-nightly=bin/clevert-nightly --impl clevert-head=bin/clevert-head"
+          python hub/bench/bench.py $impls --corpus cantrbry.zip --levels "$LEVELS" \
+            --runs 5 --max-level-runs 3 --modes single \
+            --label "${{ matrix.os }} (GitHub Actions)" --out "bench-${{ matrix.os }}.json"
+
+      - name: Benchmark (10 MB of enwik8, gzip)
+        run: |
+          set -euo pipefail
+          impls="--impl ours-portable=bin/ours-portable"
+          [ -e bin/ours-v3 ] && impls="$impls --impl ours-v3=bin/ours-v3"
+          impls="$impls --impl clevert-nightly=bin/clevert-nightly --impl clevert-head=bin/clevert-head"
+          python hub/bench/bigfile.py $impls --input enwik10m --levels 3,6 --runs 3 \
+            --out "big-${{ matrix.os }}.json"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compare-${{ matrix.os }}
+          path: |
+            bench-${{ matrix.os }}.json
+            big-${{ matrix.os }}.json
