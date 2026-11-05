@@ -1,7 +1,21 @@
-Third-Party License Notes
-=========================
+Third-Party License Notes (Rust branch)
+======================================
 
-As of the pure-Go rewrite, the runtime compression engine uses only Go standard library packages.
-No bundled C/C++ third-party compression sources are shipped in this repository.
+ECT is licensed under the Apache License 2.0 (see License.txt).
 
-Historical license texts are kept in this folder for archival/reference purposes.
+The Rust implementation on this branch depends on the following crates.
+Exact versions are pinned in Cargo.lock.
+
+flate2 (https://github.com/rust-lang/flate2-rs)             MIT OR Apache-2.0
+zlib-rs (https://github.com/trifectatechfoundation/zlib-rs) Zlib
+png (https://github.com/image-rs/image-png)                 MIT OR Apache-2.0
+fdeflate (https://github.com/image-rs/fdeflate)              MIT OR Apache-2.0
+miniz_oxide (https://github.com/Frommi/miniz_oxide)          MIT OR Zlib OR Apache-2.0
+zip (https://github.com/zip-rs/zip2)                        MIT
+crc32fast, adler2, simd-adler32, memchr, indexmap, hashbrown,
+bitflags, cfg-if, typed-path, getrandom, windows-sys,
+windows-link, equivalent                                    MIT and/or Apache-2.0 (see each crate)
+
+No bundled C/C++ sources are used. The other license texts in this folder
+belong to the bundled C/C++ libraries of the `cpp` branch (mozjpeg,
+zopfli/Apache-2.0, FSE, fast_zlib) and are kept for reference.
