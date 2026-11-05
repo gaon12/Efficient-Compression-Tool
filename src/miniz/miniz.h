@@ -41,7 +41,10 @@
 
 #if MINIZ_X86_OR_X64_CPU
 // Set MINIZ_USE_UNALIGNED_LOADS_AND_STORES to 1 on CPU's that permit efficient integer loads and stores from unaligned addresses.
-#define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 1
+// ECT: disabled. The unaligned path dereferences casted pointers, which is
+// undefined behavior (UBSan: misaligned load in mz_zip_reader_read_central_dir);
+// compilers turn the byte-wise MZ_READ_LE* macros into single loads anyway.
+#define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
 #endif
 
 #ifdef __cplusplus
