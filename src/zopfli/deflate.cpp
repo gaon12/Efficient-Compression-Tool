@@ -1073,8 +1073,9 @@ static void DeflateDynamicBlock(const ZopfliOptions* options, int final,
   }
   else{
     ZopfliLZ77Optimal2(options, in, instart, inend, &store, *costmodelnotinited, statsp, mfinexport);
+    /* Only the dynamic path initializes the cost model in statsp. */
+    *costmodelnotinited = 0;
   }
-  *costmodelnotinited = 0;
 
   /* For small block, encoding with fixed tree can be smaller. For large block,
   don't bother doing this expensive test, dynamic tree will be better.*/
