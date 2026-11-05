@@ -55,6 +55,12 @@ npoints: pointer to amount of splitpoints, for the dynamic array. The amount of
 void ZopfliBlockSplit(const ZopfliOptions* options, const unsigned char* in, size_t instart,
                       size_t inend, size_t** splitpoints, size_t* npoints, SymbolStats** stats, unsigned char twiceMode, ZopfliLZ77Store twiceStore);
 
+/*
+Splits LZ77 data from the optimal parse and returns the estimated size in bits
+of the resulting dynamic blocks.
+*/
+double ZopfliResplitCost(const ZopfliOptions* options, const ZopfliLZ77Store* store);
+
 #ifdef __cplusplus
 }
 #endif

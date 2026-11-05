@@ -260,4 +260,6 @@ void ZopfliInitOptions(ZopfliOptions* options, unsigned _mode, unsigned multithr
   options->entropysplit = mode < 3;
   options->greed = isPNG ? mode > 3 ? 258 : 50 : 258;
   options->advanced = mode >= 5;
+  options->resplit = isPNG ? 0 : 2;
+  options->mergeiterations = isPNG ? 0 : 3;
 }

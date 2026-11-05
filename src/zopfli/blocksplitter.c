@@ -281,6 +281,21 @@ static unsigned symtox(unsigned lls){
   return 200;
 }
 
+double ZopfliResplitCost(const ZopfliOptions* options, const ZopfliLZ77Store* store) {
+  size_t* points = 0;
+  size_t npoints = 0;
+  double cost = 0;
+  size_t i;
+  ZopfliBlockSplitLZ77(store->litlens, store->dists, store->size, &points, &npoints, options, store->symbols);
+  for (i = 0; i <= npoints; i++) {
+    size_t start = i == 0 ? 0 : points[i - 1];
+    size_t end = i == npoints ? store->size : points[i];
+    cost += ZopfliCalculateBlockSize(store->litlens, store->dists, start, end, 2, options->searchext, store->symbols);
+  }
+  free(points);
+  return cost;
+}
+
 void ZopfliBlockSplit(const ZopfliOptions* options,
                       const unsigned char* in, size_t instart, size_t inend,
                       size_t** splitpoints, size_t* npoints, SymbolStats** stats, unsigned char twiceMode, ZopfliLZ77Store twiceStore) {

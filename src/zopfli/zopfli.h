@@ -83,6 +83,13 @@ typedef struct ZopfliOptions {
   /*Block split twice*/
   unsigned twice;
 
+  /*Block split again after the optimal parse when that is estimated to
+    gain at least this many parts per thousand (0: never).*/
+  unsigned resplit;
+
+  /*Merge blocks on a parse with this many iterations first (0: never).*/
+  int mergeiterations;
+
   /*Sorry, can't figure out a better name. Leads to better final LZ costmodel*/
   unsigned ultra;
 
