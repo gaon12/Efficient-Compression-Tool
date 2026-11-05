@@ -41,9 +41,9 @@ ect [options] files/folders...
 | ------ | ------- |
 | `-1` ... `-9` | Compression level (default `-3`). Higher is smaller and slower. |
 | `-strip` | Strip metadata where supported. |
-| `-recurse` | Process directories recursively. |
-| `-gzip` | Compress files to `.gz` (and re-optimize existing `.gz` files). |
-| `-zip` | Pack files/directories into `.zip`; existing ZIP archives are re-optimized in place. |
+| `-recurse` | Also process subdirectories (without it, a directory argument means the files directly inside it). |
+| `-gzip` | Compress every file, images included, to `<file>.gz` (existing `.gz` files are re-optimized in place). |
+| `-zip` | Pack files/directories into `.zip`; existing ZIP archives are re-optimized in place. Without `-zip`, ZIP-based files (`.jar`, `.apk`, `.docx`, `.epub`, ...) are never modified. |
 | `-keep` | Keep the original modification time. |
 | `-quiet` | Print errors only. |
 | `--strict` | Keep stored ZIP entries stored (no stored -> Deflate conversion). |
@@ -55,6 +55,17 @@ Each branch's README lists the options and behavior specific to that
 implementation (for example the C/C++ version also supports
 `--mt-deflate`, `--allfilters` and `-progressive` JPEG encoding).
 
+Known behavioral differences between the implementations:
+
+- `-zip` with several arguments: the C/C++ version packs all of them into
+  one archive named after the first argument; Go and Rust create one
+  archive per argument.
+- Symbolic links: the C/C++ version optimizes the file a link points to;
+  Go and Rust report links as errors and never follow them.
+- Compression: the C/C++ version uses Zopfli, optipng and mozjpeg and
+  produces the smallest files; Go and Rust re-encode with their standard
+  libraries (see the comparison below).
+
 ## What is on this branch
 
 `master` holds no implementation code. It contains:
@@ -62,6 +73,10 @@ implementation (for example the C/C++ version also supports
 - this overview,
 - [`bench/`](bench): a cross-implementation benchmark (`bench.py`) and a
   Markdown report generator (`report.py`),
+- [`conformance/`](conformance): a robustness and losslessness harness
+  that runs all implementations on about 150 valid, unusual and corrupt
+  inputs and checks that output decodes to the same content, metadata
+  survives, and corrupt files are left untouched,
 - the `benchmark` GitHub Actions workflow, which builds all three branches
   on Linux, macOS and Windows and benchmarks them on identical inputs,
 - [`doc/Manual.docx`](doc/Manual.docx), the original user manual.
