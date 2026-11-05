@@ -181,7 +181,12 @@ if(ECT_WEBP_SUPPORT)
   find_library(WEBP_LIBRARY NAMES webp libwebp)
   find_library(WEBPMUX_LIBRARY NAMES webpmux libwebpmux)
   if(WEBP_INCLUDE_DIR AND WEBP_LIBRARY AND WEBPMUX_LIBRARY)
-    target_include_directories(ect PRIVATE ${WEBP_INCLUDE_DIR})
+    # SYSTEM AFTER: the WebP prefix (e.g. /opt/homebrew/include) often also
+    # holds the jpeglib.h/jconfig.h of a system libjpeg-turbo. Searching it
+    # last keeps the bundled mozjpeg headers in effect; otherwise transupp.c
+    # is compiled against another JPEG_LIB_VERSION and fails to link
+    # (undefined jpeg_core_output_dimensions).
+    target_include_directories(ect SYSTEM AFTER PRIVATE ${WEBP_INCLUDE_DIR})
     target_link_libraries(ect ${WEBP_LIBRARY} ${WEBPMUX_LIBRARY})
     target_compile_definitions(ect PRIVATE WEBP_SUPPORTED=1)
   else()
