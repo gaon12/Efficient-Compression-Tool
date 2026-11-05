@@ -1,6 +1,6 @@
 # Publishes C/C++ release binaries of ECT.
 #
-# Triggered by tags of the form `cpp-v*` (e.g. cpp-v0.9.8), so releases of
+# Triggered by tags of the form `cpp-v*` (e.g. cpp-v0.11.0), so releases of
 # the Go, Rust and C/C++ branches never collide.
 # Asset naming: ect-cpp_<tag>_<os>_<arch>.(zip|tar.gz), plus checksums.txt.
 #
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. cpp-v0.9.8)'
+        description: 'Release tag (e.g. cpp-v0.11.0)'
         required: true
       prerelease:
         description: 'Mark as prerelease'
