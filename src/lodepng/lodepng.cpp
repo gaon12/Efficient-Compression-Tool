@@ -625,7 +625,7 @@ static unsigned lodepng_chunk_createv(ucvector* out,
   CERROR_TRY_RETURN(lodepng_chunk_init(&chunk, out, length, type));
 
   /*3: the data*/
-  memcpy(chunk + 8, data, length);
+  if(length) memcpy(chunk + 8, data, length); /*IEND passes data == NULL*/
 
   /*4: CRC (of the chunkname characters and the data)*/
   lodepng_chunk_generate_crc(chunk);
@@ -2937,6 +2937,26 @@ static void decodeGeneric(unsigned char** out, unsigned* w, unsigned* h,
     state->error = postProcessScanlines(*out, scanlines, *w, *h, &state->info_png);
   }
   free(scanlines);
+  /*ECT: reject palette indices beyond the PLTE entries. Upstream lodepng
+  decodes them as opaque black, so optimizing such a (spec-violating) file
+  would silently rewrite it; libpng, used for the other levels, rejects it.*/
+  if(!state->error && state->info_png.color.colortype == LCT_PALETTE) {
+    const LodePNGColorMode* mode = &state->info_png.color;
+    size_t numpixels = (size_t)(*w) * (size_t)(*h);
+    size_t i;
+    for(i = 0; i != numpixels; ++i) {
+      unsigned index;
+      if(mode->bitdepth == 8) index = (*out)[i];
+      else {
+        size_t j = i * mode->bitdepth;
+        index = readBitsFromReversedStream(&j, *out, mode->bitdepth);
+      }
+      if(index >= mode->palettesize) {
+        state->error = 116;
+        break;
+      }
+    }
+  }
 }
 
 unsigned lodepng_decode(unsigned char** out, unsigned* w, unsigned* h,
@@ -3467,7 +3487,7 @@ static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, 
     }
 
     for(y = 0; y != h; ++y) { /*try the 5 filter types*/
-      memcpy(rem, &in2[y * linebytes], linebytes * clean);
+      if(clean) memcpy(rem, &in2[y * linebytes], linebytes);
       for(type = 0; type != 5; ++type) {
         size_t size = 0;
         if(clean) {
@@ -3633,7 +3653,7 @@ static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, 
 
     if(!error) {
     for(y = 0; y != h; ++y) {
-      memcpy(rem, &in2[y * linebytes], linebytes * clean);
+      if(clean) memcpy(rem, &in2[y * linebytes], linebytes);
       /*try the 5 filter types*/
       for(type = 0; type != 5; ++type) {
         size_t sum = 0;
@@ -3692,7 +3712,7 @@ static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, 
     }
 
     for(y = 0; y != h; ++y) {
-      memcpy(rem, &in2[y * linebytes], linebytes * clean);
+      if(clean) memcpy(rem, &in2[y * linebytes], linebytes);
       /*try the 5 filter types*/
       for(type = 0; type != 5; ++type) {
         size_t sum = 0;
@@ -3742,7 +3762,7 @@ static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, 
     }
 
     for(y = 0; y != h; ++y) {
-      memcpy(rem, &in2[y * linebytes], linebytes * clean);
+      if(clean) memcpy(rem, &in2[y * linebytes], linebytes);
       /*try the 5 filter types*/
       for(type = 0; type != 5; ++type) {
         size_t sum = 0;
@@ -3792,7 +3812,7 @@ static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, 
     }
 
     for(y = 0; y != h; ++y) {
-      memcpy(rem, &in2[y * linebytes], linebytes * clean);
+      if(clean) memcpy(rem, &in2[y * linebytes], linebytes);
       /*try the 5 filter types*/
       for(type = 0; type != 5; ++type) {
         if(clean) {
@@ -4523,6 +4543,7 @@ const char* lodepng_error_text(unsigned code) {
     case 113: return "ICC profile unreasonably large";
     case 114: return "sBIT chunk has wrong size for the color type of the image";
     case 115: return "sBIT value out of range";
+    case 116: return "palette index out of range of the PLTE chunk";
   }
   return "unknown error code";
 }
