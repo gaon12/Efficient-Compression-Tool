@@ -3755,11 +3755,16 @@ static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, 
       memcpy(row + 1, &in[y * linebytes], linebytes);
       if(clean) filterScanline2(row + 1, 0, linebytes, 0);
     }
-    error = filterEstimated(out, in, h, linebytes, bytewidth, clean, true);
-    if(!error && filter_estimator::FilterEstimator::estimate(zero.data(), size)
-                 < 0.97 * filter_estimator::FilterEstimator::estimate(out, size)) {
-      memcpy(out, zero.data(), size);
+    /*Palette and sub-byte images are left unfiltered, as the PNG spec
+    recommends: filtering indices rarely helps, and on the test set the two
+    were within 0.1% while estimating cost as much as for truecolor.*/
+    bool unfiltered = color->colortype == LCT_PALETTE || color->bitdepth < 8;
+    if(!unfiltered) {
+      error = filterEstimated(out, in, h, linebytes, bytewidth, clean, true);
+      unfiltered = !error && filter_estimator::FilterEstimator::estimate(zero.data(), size)
+                             < 0.97 * filter_estimator::FilterEstimator::estimate(out, size);
     }
+    if(unfiltered) memcpy(out, zero.data(), size);
   } else if(strategy == LFS_MINSUM) {
     /*adaptive filtering*/
     unsigned char* attempt[5]; /*five filtering attempts, one for each filter type*/
