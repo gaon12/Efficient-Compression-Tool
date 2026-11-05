@@ -3375,7 +3375,10 @@ static void sig_handler(int signo) {
   }
 }
 
-static char windowbits(unsigned long len) {
+/*Returns the negative (raw deflate) zlib windowBits for a stream of len bytes.
+The return type must be signed: plain char is unsigned on e.g. Linux on ARM,
+where -15 became 241 and deflateInit2 failed (reported as error 83).*/
+static int windowbits(unsigned long len) {
   int result = 0;
 #ifdef __GNUC__
   result = __builtin_clzl(len) ^ (8 * sizeof(unsigned long) - 1);
