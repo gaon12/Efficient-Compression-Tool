@@ -21,6 +21,13 @@
 #include <arm_acle.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
+
+/* This branch does not include zutil.h (whose zlib.h declares a different
+   crc32), so it has its own unaligned load helpers. */
+static inline uint16_t zread16(const void *p) { uint16_t v; memcpy(&v, p, 2); return v; }
+static inline uint32_t zread32(const void *p) { uint32_t v; memcpy(&v, p, 4); return v; }
+static inline uint64_t zread64(const void *p) { uint64_t v; memcpy(&v, p, 8); return v; }
 
 uint32_t crc32(uint32_t crc, uint8_t *buf, size_t len) {
     crc = ~crc;
