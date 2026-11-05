@@ -22,7 +22,6 @@
 #include "mozjpeg/transupp.h"           /* Support routines for jpegtran */
 #include "main.h"
 #include "support.h"
-#include "mozjpeg/jerror.h"
 #include <csetjmp>
 #include <cstring>
 #include <vector>
@@ -50,13 +49,15 @@ ect_emit_message (j_common_ptr cinfo, int msg_level)
   if (msg_level >= 0) {
     return;  /* trace messages */
   }
-  /* Extraneous bytes between markers carry no image data. Every other
-     warning (premature end of data, corrupt Huffman data, ...) means that
-     libjpeg made up coefficients, and writing them back would replace the
-     damaged original with a "valid" but different image. */
-  if (cinfo->err->msg_code != JWRN_EXTRANEOUS_DATA) {
-    reinterpret_cast<ECTJpegErrorMgr*>(cinfo->err)->corrupt_warnings++;
-  }
+  /* Every warning means damaged input: premature end of data, corrupt
+     Huffman data, ... make libjpeg invent coefficients, and writing them
+     back would replace the damaged original with a "valid" but different
+     image. That includes JWRN_EXTRANEOUS_DATA ("N extraneous bytes before
+     marker"): it is also what is left of a scan whose entropy-coded data
+     was cut or mangled, and in a progressive file the decoded image then
+     changes once the scans are rewritten. (0xFF fill bytes, which the
+     standard allows, do not raise it.) */
+  reinterpret_cast<ECTJpegErrorMgr*>(cinfo->err)->corrupt_warnings++;
   if (cinfo->err->num_warnings == 0) {
     (*cinfo->err->output_message) (cinfo);
   }
