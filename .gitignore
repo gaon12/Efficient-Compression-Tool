@@ -11,3 +11,6 @@ bin/
 
 # macOS ancillary files
 .DS_Store
+
+# Rust build outputs
+rust/target/

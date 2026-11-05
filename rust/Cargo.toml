@@ -1,0 +1,22 @@
+[package]
+name = "ect"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Efficient Compression Tool - pure Rust implementation"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "ect"
+path = "src/lib.rs"
+
+[dependencies]
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+png = "0.18"
+zip = { version = "9.3", default-features = false, features = ["deflate-flate2"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
