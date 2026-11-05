@@ -1,13 +1,7 @@
-# Legacy build outputs
-*.o
-*.a
-build/
-
-# Go build outputs
-bin/
-/ect
-/ect.exe
-*.test
+# Benchmark working files
+/bench/work/
+/bench/*.json
+__pycache__/
 
 # macOS ancillary files
 .DS_Store

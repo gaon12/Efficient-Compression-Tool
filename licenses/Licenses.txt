@@ -1,7 +1,0 @@
-Third-Party License Notes
-=========================
-
-As of the pure-Go rewrite, the runtime compression engine uses only Go standard library packages.
-No bundled C/C++ third-party compression sources are shipped in this repository.
-
-Historical license texts are kept in this folder for archival/reference purposes.
