@@ -35,11 +35,11 @@ All of them share the same command line interface.
 
 | Format | Behavior |
 | ------ | -------- |
-| PNG    | Lossless re-encode (same color type, bit depth, palette and tRNS) at high compression; APNG is left untouched |
+| PNG    | Lossless re-encode (same color type, bit depth, palette and tRNS); higher levels try more filter / zlib level combinations and keep the smallest (`-1`: 1, `-3`: 4, `-6`: 7, `-9`: 14 encodes); APNG is left untouched |
 | JPEG   | Removal of APPn/COM metadata segments with `-strip`; pixel data untouched |
 | WebP   | Detected and parsed; animated WebP is skipped; no re-encode |
 | GZIP   | Re-compress existing `.gz` keeping name, comment, extra field, mtime and OS; `-gzip` creates `<file>.gz` |
-| ZIP    | Re-deflate entries (stored entries become deflated unless `--strict`); `-zip` creates `<path>.zip` |
+| ZIP    | Re-deflate entries (stored entries become deflated unless `--strict`); `-zip` creates `<path>.zip` for files and directories and re-optimizes existing archives in place |
 
 ## CLI
 
@@ -49,11 +49,11 @@ ect [options] files/folders...
 
 | Option | Meaning |
 | ------ | ------- |
-| `-1` ... `-9` | Compression level (default `-3`) |
+| `-1` ... `-9` | Compression level (default `-3`); `-1` uses zlib level 2 for Deflate output, `-2`...`-9` map to the same zlib level |
 | `-strip` | Strip metadata where the format allows |
 | `-recurse` | Recursively process directories |
 | `-gzip` | Optimize `.gz` files and compress other files to `<file>.gz` |
-| `-zip` | Create `<path>.zip` for every given file or directory |
+| `-zip` | Create `<path>.zip` for every given file or directory; existing ZIP archives are re-optimized in place (same as the C/C++ version) |
 | `-keep` | Keep the original modification time |
 | `-quiet` | Print only errors |
 | `--disable-png`, `--disable-jpg`, `--disable-webp` | Skip a format |
