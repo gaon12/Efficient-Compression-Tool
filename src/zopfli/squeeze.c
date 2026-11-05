@@ -385,7 +385,7 @@ static void GetBestLengths2(const unsigned char* in, size_t instart, size_t inen
     float newCost = costs[j] + literals[in[i]];
     if (newCost < costs[j + 1]) {
       costs[j + 1] = newCost;
-      length_array[j + 1] = 1U + (in[i] << 24);
+      length_array[j + 1] = 1U + ((unsigned)in[i] << 24);
     }
   }
 
@@ -656,7 +656,7 @@ static void GetBestLengths(const ZopfliOptions* options, const unsigned char* in
     float newCost = costs[j] + literals[in[i]];
     if (newCost < costs[j + 1]) {
       costs[j + 1] = newCost;
-      length_array[j + 1] = 1U + (in[i] << 24);
+      length_array[j + 1] = 1U + ((unsigned)in[i] << 24);
     }
 
     if (i == inend - ZOPFLI_MAX_MATCH - 1 && mfinexport & 2){
@@ -735,7 +735,7 @@ static void GetBestLengthsultra2(const unsigned char* in, size_t instart, size_t
     unsigned newCost = costs[j] + literals[in[i]];
     if (newCost < costs[j + 1]) {
       costs[j + 1] = newCost;
-      length_array[j + 1] = 1U + (in[i] << 24);
+      length_array[j + 1] = 1U + ((unsigned)in[i] << 24);
     }
   }
 
