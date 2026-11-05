@@ -623,7 +623,7 @@ unsigned zipHandler(std::vector<int> args, const char * argv[], int files, const
 
                 if(isDirectory(file_path)){
                     //Only add dir if it is empty to minimize filesize
-                    if (j + 1 < files) {
+                    if (j + 1 < paths.size()) {
                         std::string next = paths[j + 1].generic_string();
                         if (next.compare(0, file_string.size(), file_string) == 0) {
                             continue;
@@ -697,7 +697,7 @@ unsigned zipHandler(std::vector<int> args, const char * argv[], int files, const
             fclose(stream);
             if (!mz_zip_add_mem_to_archive_file_in_place(zipfilename.c_str(), ((std::string)argv[args[i]]).substr(((std::string)argv[args[i]]).find_last_of("/\\") + 1).c_str(), file.data(), file_size, 0, 0, argv[args[i]])
                 ) {
-                fprintf(stderr, "can't add file '%s'\n", argv[0]);
+                fprintf(stderr, "can't add file '%s'\n", argv[args[i]]);
                 error = 1; continue;
             }
             local_bytes += filesize(argv[args[i]]);
