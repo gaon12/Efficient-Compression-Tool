@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <atomic>
 #include <cctype>
+#include <cstring>
 #include <vector>
 
 #ifdef WEBP_SUPPORTED
@@ -246,6 +247,33 @@ static int ECTGzip(const char * Infile, const unsigned Mode, unsigned char multi
     }
 }
 
+// Largest canvas ECT decodes (256 megapixels: up to 1 GiB as 8-bit RGBA, 2 GiB
+// as 16-bit RGBA). The same limit is used by the Go and Rust versions.
+static const unsigned long long kMaxPNGPixels = 1ULL << 28;
+
+// Rejects PNGs whose IHDR declares a canvas above kMaxPNGPixels before any
+// decoder allocates it: a few hundred bytes can otherwise make the decoders
+// try to allocate tens of gigabytes (a "decompression bomb").
+static bool PNGDimensionsWithinLimit(const char * Infile){
+    unsigned char header[24];
+    FILE* f = fopen(Infile, "rb");
+    if (!f) {
+        return true;  // let the decoder report the error
+    }
+    size_t n = fread(header, 1, sizeof(header), f);
+    fclose(f);
+    if (n < sizeof(header) || memcmp(header + 12, "IHDR", 4) != 0) {
+        return true;  // not a well-formed start; the decoders reject it
+    }
+    unsigned long long w = ((unsigned long long)header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
+    unsigned long long h = ((unsigned long long)header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+    if (w * h > kMaxPNGPixels) {
+        fprintf(stderr, "%s: PNG dimensions %llux%llu exceed the %llu pixel limit, skipping\n", Infile, w, h, kMaxPNGPixels);
+        return false;
+    }
+    return true;
+}
+
 static unsigned char OptimizePNG(const char * Infile, const ECTOptions& Options){
     unsigned _mode = Options.Mode;
     unsigned mode = (Options.Mode % 10000) > 9 ? 9 : (Options.Mode % 10000);
@@ -258,6 +286,9 @@ static unsigned char OptimizePNG(const char * Infile, const ECTOptions& Options)
     long long size = filesize(Infile);
     if(size < 0){
         fprintf(stderr, "Can't read from %s\n", Infile);
+        return 1;
+    }
+    if(!PNGDimensionsWithinLimit(Infile)){
         return 1;
     }
     if(mode == 9 && !Options.Reuse && !Options.Allfilters){
