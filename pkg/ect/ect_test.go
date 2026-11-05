@@ -378,11 +378,34 @@ func TestPNGDimensionLimit(t *testing.T) {
 	}
 }
 
-func TestDirectoryRequiresRecurse(t *testing.T) {
+// Without -recurse a directory argument means the files directly inside it
+// (as in the C/C++ version); -recurse also descends into subdirectories.
+func TestDirectoryWithoutRecurseProcessesTopLevelFiles(t *testing.T) {
 	dir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(dir, "x.txt"), []byte("x"), 0o644)
-	if res := Process(quietConfig(), []string{dir}); len(res.Errors) != 1 {
-		t.Fatalf("expected one error, got %v", res.Errors)
+	_ = os.Mkdir(filepath.Join(dir, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "top.txt"), compressibleText(), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "sub", "deep.txt"), compressibleText(), 0o644)
+
+	cfg := quietConfig()
+	cfg.GzipMode = true
+	if res := Process(cfg, []string{dir}); res.HasErrors() {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "top.txt.gz")); err != nil {
+		t.Fatal("top-level file was not processed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sub", "deep.txt.gz")); err == nil {
+		t.Fatal("subdirectory was processed without -recurse")
+	}
+
+	// Start the recursive pass from a clean slate (top.txt.gz exists now).
+	_ = os.Remove(filepath.Join(dir, "top.txt.gz"))
+	cfg.Recursive = true
+	if res := Process(cfg, []string{dir}); res.HasErrors() {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sub", "deep.txt.gz")); err != nil {
+		t.Fatal("subdirectory was not processed with -recurse")
 	}
 }
 

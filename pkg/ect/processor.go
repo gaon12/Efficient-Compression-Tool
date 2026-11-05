@@ -97,7 +97,18 @@ func (p *Processor) collectFiles(paths []string, rb *resultBuilder) []string {
 		}
 
 		if !p.cfg.Recursive {
-			rb.addError(path, errors.New("is a directory (use -recurse to process its files)"))
+			// Same as the C/C++ version: without -recurse a directory
+			// argument means the regular files directly inside it.
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				rb.addError(path, err)
+				continue
+			}
+			for _, e := range entries {
+				if e.Type().IsRegular() {
+					filesMap[filepath.Join(path, e.Name())] = struct{}{}
+				}
+			}
 			continue
 		}
 
