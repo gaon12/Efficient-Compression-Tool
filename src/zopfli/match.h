@@ -13,16 +13,40 @@
  scan is the position to compare
  match is the earlier position to compare.
  end is the last possible byte, beyond which to stop looking.
- safe_end is a few (8) bytes before end, for comparing multiple bytes at once.
- */
-#include <stdint.h>
+ safe_end is unused and kept for compatibility with existing callers.
 
-#if defined(__GNUC__) || defined(__clang__)
-  #define _RESTRICT __restrict__
-#elif defined(_MSC_VER)
-  #define _RESTRICT __restrict
+ The comparison runs eight bytes at a time through memcpy loads, so it is
+ safe for any alignment, and it never reads at or beyond end. The previous
+ version (based on cloudflare's zlib fork) dereferenced casted pointers and
+ read up to 15 bytes past end. The loop structure follows clevert-app/ect
+ ("Modify GetMatch, avoid out of bound access, fix more cast-align UB"),
+ where it benchmarked as fast as the original on x86-64 and arm64.
+ */
+#ifndef ZOPFLI_MATCH_H_
+#define ZOPFLI_MATCH_H_
+
+#include <stdint.h>
+#include "util.h"
+
+#if defined(_MSC_VER) && !defined(__clang__) && (defined(_M_X64) || defined(_M_ARM64))
+#include <intrin.h>
+#endif
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define ZOPFLI_MATCH_WORDS 0
+#elif defined(__GNUC__) || defined(__clang__)
+#define ZOPFLI_MATCH_WORDS 1
+/* Index of the first differing byte of two little-endian words (x != 0). */
+static inline unsigned ZopfliFirstDiff64(uint64_t x) { return (unsigned)__builtin_ctzll(x) >> 3; }
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
+#define ZOPFLI_MATCH_WORDS 1
+static __forceinline unsigned ZopfliFirstDiff64(uint64_t x) {
+  unsigned long i;
+  _BitScanForward64(&i, x);
+  return (unsigned)i >> 3;
+}
 #else
-  #define _RESTRICT
+#define ZOPFLI_MATCH_WORDS 0
 #endif
 
 #ifdef __GNUC__
@@ -30,70 +54,34 @@ __attribute__ ((always_inline, hot))
 #elif defined(_MSC_VER)
 __forceinline
 #endif
-static inline const unsigned char* GetMatch(const unsigned char* _RESTRICT scan,
-                                            const unsigned char* _RESTRICT match,
-                                            const unsigned char* _RESTRICT end
-                                            , const unsigned char* safe_end) {
-#undef _RESTRICT
-#ifdef __GNUC__
-  /* Optimized Function based on cloudflare's zlib fork.
-   * Note that this may read up to 15 bytes beyond end,
-   * so it is necessary to allocate memory beyond the
-   * end of the data whenever ZopfliDeflate is called.
-   */
-  do {
-    uint64_t sv = *(uint64_t*)(void*)scan;
-    uint64_t mv = *(uint64_t*)(void*)match;
-    uint64_t xor = sv ^ mv;
-    if (xor) {
-      scan += (__builtin_ctzll(xor) >> 3);
-      break;
+static inline const unsigned char* GetMatch(const unsigned char* scan,
+                                            const unsigned char* match,
+                                            const unsigned char* end,
+                                            const unsigned char* safe_end) {
+  (void)safe_end;
+#if ZOPFLI_MATCH_WORDS
+  while (end - scan >= 8) {
+    uint64_t x = ZopfliRead64(scan) ^ ZopfliRead64(match);
+    if (x) {
+      return scan + ZopfliFirstDiff64(x);
     }
     scan += 8;
     match += 8;
-    sv = *(uint64_t*)(void*)scan;
-    mv = *(uint64_t*)(void*)match;
-    xor = sv ^ mv;
-    if (xor) {
-      scan += (__builtin_ctzll(xor) >> 3);
-      break;
-    }
-    scan += 8;
-    match += 8;
-  } while (scan < end);
-
-  if (unlikely(scan > end))
-    scan = end;
-  return scan;
-
-#else
-
-  if (sizeof(size_t) == 8) {
-    /* 8 checks at once per array bounds check (size_t is 64-bit). */
-    while (scan < safe_end && *((size_t*)scan) == *((size_t*)match)) {
-      scan += 8;
-      match += 8;
-    }
-  } else if (sizeof(unsigned) == 4) {
-    /* 4 checks at once per array bounds check (unsigned is 32-bit). */
-    while (scan < safe_end
-           && *((unsigned*)scan) == *((unsigned*)match)) {
-      scan += 4;
-      match += 4;
-    }
-  } else {
-    /* do 8 checks at once per array bounds check. */
-    while (scan < safe_end && *scan == *match && *++scan == *++match
-           && *++scan == *++match && *++scan == *++match
-           && *++scan == *++match && *++scan == *++match
-           && *++scan == *++match && *++scan == *++match) {
-      scan++; match++;
-    }
   }
-  /* The remaining few bytes. */
-  while (scan != end && *scan == *match) {
-    scan++; match++;
+  if (end - scan >= 4) {
+    uint32_t x = ZopfliRead32(scan) ^ ZopfliRead32(match);
+    if (x) {
+      return scan + ZopfliFirstDiff64(x);
+    }
+    scan += 4;
+    match += 4;
   }
-  return scan;
 #endif
+  while (scan < end && *scan == *match) {
+    scan++;
+    match++;
+  }
+  return scan;
 }
+
+#endif

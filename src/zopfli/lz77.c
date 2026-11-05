@@ -146,14 +146,14 @@ typedef struct
 
 #ifdef __SSE4_2__
 #include <nmmintrin.h>
-static U32 LZ4HC_hashPtr(const void* ptr) { return _mm_crc32_u32(0, *(unsigned*)ptr) >> (32-HASH_LOG); }
-static U32 LZ4HC_hashPtr3(const void* ptr) { return _mm_crc32_u32(0, (*(unsigned*)ptr) & 0xFFFFFF) >> (32-HASH_LOG3); }
+static U32 LZ4HC_hashPtr(const void* ptr) { return _mm_crc32_u32(0, ZopfliRead32(ptr)) >> (32-HASH_LOG); }
+static U32 LZ4HC_hashPtr3(const void* ptr) { return _mm_crc32_u32(0, ZopfliRead32(ptr) & 0xFFFFFF) >> (32-HASH_LOG3); }
 #else
 #define HASH_FUNCTION(i)       (((i) * 2654435761U) >> (32-HASH_LOG))
 #define HASH_FUNCTION3(i)       (((i) * 2654435761U) >> (32-HASH_LOG3))
 
-static U32 LZ4HC_hashPtr(const void* ptr) { return HASH_FUNCTION(*(unsigned*)ptr); }
-static U32 LZ4HC_hashPtr3(const void* ptr) { return HASH_FUNCTION3((*(unsigned*)ptr) & 0xFFFFFF); }
+static U32 LZ4HC_hashPtr(const void* ptr) { return HASH_FUNCTION(ZopfliRead32(ptr)); }
+static U32 LZ4HC_hashPtr3(const void* ptr) { return HASH_FUNCTION3(ZopfliRead32(ptr) & 0xFFFFFF); }
 #endif
 
 static void LZ4HC_init (LZ4HC_Data_Structure* hc4, const BYTE* start)
@@ -235,13 +235,13 @@ static int LZ4HC_InsertAndFindBestMatch(LZ4HC_Data_Structure* hc4,   /* Index ta
   LZ4HC_Insert(hc4, ip);
   U32 matchIndex = HashTable[LZ4HC_hashPtr(ip)];
   if(HashTable[LZ4HC_hashPtr(ip + ml - 3)] < (lowLimit + ml - 3)) {*matchpos = ip; return ml;}
-  U32 start = *(unsigned*)ip;
-  U32 end = *(unsigned*)(ip + ml - 3);
+  U32 start = ZopfliRead32(ip);
+  U32 end = ZopfliRead32(ip + ml - 3);
 
   while ((matchIndex>=lowLimit) && nbAttempts)
   {
     match = base + matchIndex;
-    if (*(unsigned*)(base2 + matchIndex) == end && *(unsigned*)(base + matchIndex) == start)
+    if (ZopfliRead32(base2 + matchIndex) == end && ZopfliRead32(base + matchIndex) == start)
     {
       size_t mlt = GetMatch(ip + 2, base + matchIndex + 2, iLimit, iLimit - 8) - ip;
 
@@ -249,7 +249,7 @@ static int LZ4HC_InsertAndFindBestMatch(LZ4HC_Data_Structure* hc4,   /* Index ta
         if (ml == ZOPFLI_MAX_MATCH){
           return ZOPFLI_MAX_MATCH;
         }
-        end = *(unsigned*)(ip + ml - 3);
+        end = ZopfliRead32(ip + ml - 3);
         base2 = base + ml - 3;
 
         if(HashTable[LZ4HC_hashPtr(ip + ml - 3)] < (lowLimit + ml - 3)) {return ml;}
@@ -273,12 +273,12 @@ static int LZ4HC_InsertAndFindBestMatch3 (LZ3HC_Data_Structure* hc4,   /* Index 
   /* HC3 match finder */
   LZ4HC_Insert3(hc4, ip);
   U32 matchIndex = HashTable[LZ4HC_hashPtr3(ip)];
-  unsigned val = (*(unsigned*)ip) & 0xFFFFFF;
+  unsigned val = ZopfliRead32(ip) & 0xFFFFFF;
 
   while ((matchIndex>=lowLimit))
   {
     const BYTE* match = base + matchIndex;
-    if (((*(unsigned*)match) & 0xFFFFFF) == val) { *matchpos = match;  return 3;}
+    if ((ZopfliRead32(match) & 0xFFFFFF) == val) { *matchpos = match;  return 3;}
     matchIndex -= chainTable[matchIndex & MAX_DISTANCE3];
   }
 
@@ -450,8 +450,8 @@ void ZopfliLZ77Counts(const unsigned short* litlens, const unsigned short* dists
     const unsigned char* ipo = &distc[rstart];
     while (ipo < distc + end)
     {
-      size_t c = *(size_t*)ipo; ipo += 8;
-      size_t c1 = *(size_t*)ipo; ipo += 8;
+      uint64_t c = ZopfliRead64(ipo); ipo += 8;
+      uint64_t c1 = ZopfliRead64(ipo); ipo += 8;
       d_count[(unsigned char) c     ]++;
       d_count1[(unsigned char)(c>>8) ]++;
       d_count2[(unsigned char)(c>>16)]++;
@@ -485,8 +485,8 @@ void ZopfliLZ77Counts(const unsigned short* litlens, const unsigned short* dists
     const unsigned short* ip = &litlens[rstart];
     while (ip < litlens + end)
     {
-      size_t c = (*(size_t*)ip) & ANDLLS; ip += 4;
-      size_t c1 = (*(size_t*)ip) & ANDLLS; ip += 4;
+      uint64_t c = ZopfliRead64(ip) & ANDLLS; ip += 4;
+      uint64_t c1 = ZopfliRead64(ip) & ANDLLS; ip += 4;
 
       ll_count[(unsigned short) c     ]++;
       ll_count1[(unsigned short)(c>>16) ]++;
@@ -498,8 +498,8 @@ void ZopfliLZ77Counts(const unsigned short* litlens, const unsigned short* dists
       ll_count2[(unsigned short)(c1>>32)]++;
       ll_count3[       c1>>48 ]++;
 
-      c = (*(size_t*)ip) & ANDLLS; ip += 4;
-      c1 = (*(size_t*)ip) & ANDLLS; ip += 4;
+      c = ZopfliRead64(ip) & ANDLLS; ip += 4;
+      c1 = ZopfliRead64(ip) & ANDLLS; ip += 4;
 
       ll_count[(unsigned short) c     ]++;
       ll_count1[(unsigned short)(c>>16) ]++;

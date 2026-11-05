@@ -154,11 +154,11 @@ typedef struct
 
 #ifdef __SSE4_2__
 #include <nmmintrin.h>
-static U32 LZ4HC_hashPtr3(const void* ptr) { return _mm_crc32_u32(0, (*(unsigned*)ptr) & 0xFFFFFF) >> (32-HASH_LOG3); }
+static U32 LZ4HC_hashPtr3(const void* ptr) { return _mm_crc32_u32(0, ZopfliRead32(ptr) & 0xFFFFFF) >> (32-HASH_LOG3); }
 #else
 #define HASH_FUNCTION3(i)       (((i) * 2654435761U) >> (32-HASH_LOG3))
 
-static U32 LZ4HC_hashPtr3(const void* ptr) { return HASH_FUNCTION3((*(unsigned*)ptr) & 0xFFFFFF); }
+static U32 LZ4HC_hashPtr3(const void* ptr) { return HASH_FUNCTION3(ZopfliRead32(ptr) & 0xFFFFFF); }
 #endif
 
 static void LZ4HC_init3 (LZ3HC_Data_Structure* hc4, const BYTE* start)
@@ -224,7 +224,7 @@ static int LZ4HC_InsertAndFindBestMatch3 (LZ3HC_Data_Structure* hc4,   /* Index 
     else {
       dsym = ZopfliGetDistSymbol(ip - match);
     }
-    if (dsym == last_dsym && (last_match == max_match || *(unsigned*)&ip[last_match - 3] != *(unsigned*)&match[last_match - 3])) {matchIndex -= chainTable[matchIndex & MAX_DISTANCE3]; continue;}
+    if (dsym == last_dsym && (last_match == max_match || ZopfliRead32(&ip[last_match - 3]) != ZopfliRead32(&match[last_match - 3]))) {matchIndex -= chainTable[matchIndex & MAX_DISTANCE3]; continue;}
     size_t mlt = GetMatch(ip, match, iLimit, iLimit - 8) - ip;
 
     if (likely(mlt >= 3)) {

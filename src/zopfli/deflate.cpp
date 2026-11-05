@@ -61,7 +61,8 @@ static void AddBits(unsigned symbol, unsigned length,
 //As this code is not that much faster it should be ok to only enable it on x86 with MSVC, GCC and clang
 #if defined(__i386__) || defined(_M_IX86) || defined(__x86_64__) || defined(_M_X64)
   //Length must be nonzero.
-    *(unsigned*)(&(out[*outsize - (!!(*bp))])) |= (symbol << (*bp));
+    unsigned char* dst = &out[*outsize - (!!(*bp))];
+    ZopfliWrite32(dst, ZopfliRead32(dst) | (symbol << (*bp)));
     (*outsize) += ((*bp) + length - 1) / 8 + (!(*bp));
     *bp = (((*bp) + length) & 7);
 }
@@ -72,7 +73,7 @@ static void AddBits2(unsigned symbol, unsigned length,
   //Length may be zero.
   unsigned pos = (*bits) >> 3;
   unsigned char bitties = ((*bits) & 7);
-  *(unsigned*)(&(out[pos])) |= (symbol << bitties);
+  ZopfliWrite32(&out[pos], ZopfliRead32(&out[pos]) | (symbol << bitties));
   (*bits) += length;
 
 #else

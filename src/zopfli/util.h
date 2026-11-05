@@ -31,7 +31,9 @@ basic deflate specification values and generic program options.
 extern "C" {
 #endif
 
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Minimum and maximum length that can be encoded in deflate. */
 #define ZOPFLI_MAX_MATCH 258
@@ -94,6 +96,28 @@ unsigned ZopfliGetDistExtraBitsValue(unsigned dist);
 #define likely(x)      x
 #define unlikely(x)    x
 #endif
+
+/*
+Unaligned loads and stores in native byte order. Casting a byte pointer to
+a wider type and dereferencing it is undefined behavior when the address is
+not suitably aligned (and breaks strict aliasing); memcpy with a constant
+size compiles to a single move on every relevant target.
+*/
+static inline uint32_t ZopfliRead32(const void* p) {
+  uint32_t v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+static inline uint64_t ZopfliRead64(const void* p) {
+  uint64_t v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+static inline void ZopfliWrite32(void* p, uint32_t v) {
+  memcpy(p, &v, sizeof(v));
+}
 
 /*
 Appends value to dynamically allocated memory, doubling its allocation size
