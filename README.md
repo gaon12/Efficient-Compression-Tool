@@ -87,6 +87,7 @@ redistributable needed).
 - `-DECT_MULTITHREADING=OFF`: Turn off multithreading support
 - `-DECT_WEBP_SUPPORT=OFF`: Never link libwebp
 - `-DWITH_SIMD=OFF`: Build mozjpeg without assembly (no NASM needed, slower JPEG processing)
+- `-DECT_X86_64_V3=ON`: Optimize for x86-64-v3 CPUs (AVX2; `-march=x86-64-v3`, or `/arch:AVX2` with MSVC). The output is identical and `-9` was ~30% faster for PNGs and ~10% faster for gzip on an Intel Core Ultra 5 325, but the binary does not run on CPUs older than Intel Haswell / AMD Excavator, so release binaries are built without it.
 
 ### With Xcode
 You can use cmake to generate an Xcode project.  Just add `-G Xcode` to the cmake configure command:

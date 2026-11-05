@@ -37,6 +37,9 @@ CMake options:
 - -DECT_MULTITHREADING=OFF   disable multithreading support
 - -DECT_WEBP_SUPPORT=OFF     never link libwebp
 - -DWITH_SIMD=OFF            build mozjpeg without assembly
+- -DECT_X86_64_V3=ON         optimize for x86-64-v3 (AVX2) CPUs: same output,
+                             -9 up to ~30% faster; does not run on CPUs
+                             older than Intel Haswell / AMD Excavator
 
 Smoke test of a built binary (needs bash; python is optional):
 

@@ -127,6 +127,30 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clan
   endif()
 endif()
 
+# Optional: target the x86-64-v3 micro-architecture level (AVX2, BMI1/2,
+# FMA, LZCNT, MOVBE; Intel Haswell / AMD Excavator, 2013-2015, and newer).
+# The binary then refuses to run on older CPUs, so this is off by default
+# and the release binaries do not use it. The output is byte-identical; on
+# an Intel Core Ultra 5 325 (Linux, GCC) `-9` became ~30% faster for PNGs
+# and ~10% faster for gzip, while `-3` and below were unchanged.
+option(ECT_X86_64_V3 "Optimize for x86-64-v3 (AVX2) CPUs; not portable to older CPUs" OFF)
+if(ECT_X86_64_V3)
+  if(NOT CPU_TYPE STREQUAL "x86_64")
+    message(FATAL_ERROR "ECT_X86_64_V3 requires an x86-64 target (CPU_TYPE is ${CPU_TYPE})")
+  endif()
+  # Set through the C/C++ flag variables (like -msse4.2 above) so that it
+  # reaches every target, including `ect` defined earlier in this file, but
+  # not NASM (mozjpeg SIMD sources).
+  if(MSVC)
+    # MSVC has no level switch; /arch:AVX2 enables the same instruction set.
+    set(ECT_V3_FLAG "/arch:AVX2")
+  else()
+    set(ECT_V3_FLAG "-march=x86-64-v3")
+  endif()
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ECT_V3_FLAG}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ECT_V3_FLAG}")
+endif()
+
 # Enable ZLIB_CONST for everything
 add_definitions(-DZLIB_CONST)
 
