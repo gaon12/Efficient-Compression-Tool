@@ -63,14 +63,7 @@ func (p *Processor) processZipTargets(paths []string, rb *resultBuilder) {
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				inputBytes, outputBytes, err := createZipArchive(path, p.cfg)
-				if err != nil {
-					rb.addError(path, err)
-					continue
-				}
-				rb.addProcessed(inputBytes)
-				rb.addSaved(inputBytes - outputBytes)
-				p.cfg.logf("%s: created ZIP archive (%d -> %d)", path, inputBytes, outputBytes)
+				p.processZipTarget(path, rb)
 			}
 		}()
 	}
@@ -132,6 +125,35 @@ func (p *Processor) collectFiles(paths []string, rb *resultBuilder) []string {
 	}
 	sort.Strings(files)
 	return files
+}
+
+// processZipTarget handles one `-zip` argument the same way as the C/C++
+// CLI: an existing ZIP archive is re-optimized in place, anything else (a
+// file or a directory) is packed into a new "<path>.zip".
+func (p *Processor) processZipTarget(path string, rb *resultBuilder) {
+	if isRegularZipFile(path) {
+		p.processFile(path, rb)
+		return
+	}
+	inputBytes, outputBytes, err := createZipArchive(path, p.cfg)
+	if err != nil {
+		rb.addError(path, err)
+		return
+	}
+	rb.addProcessed(inputBytes)
+	rb.addSaved(inputBytes - outputBytes)
+	p.cfg.logf("%s: created ZIP archive (%d -> %d)", path, inputBytes, outputBytes)
+}
+
+// isRegularZipFile reports whether path is a regular file (symlinks are not
+// followed) whose content is a ZIP archive.
+func isRegularZipFile(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	kind, err := detectFileType(path)
+	return err == nil && kind == FileZIP
 }
 
 func (p *Processor) processFiles(files []string, rb *resultBuilder) {

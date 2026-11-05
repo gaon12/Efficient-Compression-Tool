@@ -267,6 +267,36 @@ func TestZipModePacksDirectory(t *testing.T) {
 	}
 }
 
+// TestZipModeReoptimizesExistingArchive checks the C/C++-compatible
+// behavior: `ect -zip archive.zip` rewrites the archive in place instead of
+// creating "archive.zip.zip".
+func TestZipModeReoptimizesExistingArchive(t *testing.T) {
+	entries := map[string][]byte{"a.txt": compressibleText()}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.zip")
+	if err := os.WriteFile(path, storedZip(t, entries, []string{"a.txt"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.Stat(path)
+
+	cfg := quietConfig()
+	cfg.ZipMode = true
+	cfg.GzipMode = true
+	if res := Process(cfg, []string{path}); res.HasErrors() {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	after, _ := os.Stat(path)
+	if after.Size() >= before.Size() {
+		t.Fatalf("archive not optimized: %d -> %d", before.Size(), after.Size())
+	}
+	if _, err := os.Stat(path + ".zip"); !os.IsNotExist(err) {
+		t.Fatalf("unexpected nested archive created: %v", err)
+	}
+	if got := readZip(t, path); !bytes.Equal(got["a.txt"], entries["a.txt"]) {
+		t.Fatal("entry changed")
+	}
+}
+
 func keys(m map[string][]byte) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
