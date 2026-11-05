@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // minDeflateSize is the entry size below which entries are always stored:
@@ -309,6 +310,7 @@ func writeZipEntry(zw *zip.Writer, hdr *zip.FileHeader, data []byte, allowDeflat
 			hdr.CompressedSize64 = uint64(len(compressed))
 			hdr.UncompressedSize64 = uint64(len(data))
 			prepareRawTimestamps(hdr)
+			prepareRawUTF8Flag(hdr)
 			w, err := zw.CreateRaw(hdr)
 			if err != nil {
 				return err
@@ -339,6 +341,9 @@ func prepareRawTimestamps(hdr *zip.FileHeader) {
 	if hdr.Modified.IsZero() {
 		return
 	}
+	// CreateRaw writes these legacy fields verbatim (it does not derive them
+	// from Modified the way CreateHeader does), so they must be set here.
+	//lint:ignore SA1019 CreateRaw needs the MS-DOS fields filled in explicitly.
 	hdr.ModifiedDate, hdr.ModifiedTime = msDosTime(hdr.Modified)
 	if hasExtraField(hdr.Extra, extTimeExtraID) || hdr.Modified.Unix() < 0 || hdr.Modified.Unix() > 1<<32-1 {
 		return
@@ -349,6 +354,30 @@ func prepareRawTimestamps(hdr *zip.FileHeader) {
 	field[4] = 1                                // flags: modification time present
 	binary.LittleEndian.PutUint32(field[5:], uint32(hdr.Modified.Unix()))
 	hdr.Extra = append(hdr.Extra, field[:]...)
+}
+
+// zipUTF8Flag is general purpose bit 11: name and comment are UTF-8.
+const zipUTF8Flag = 0x800
+
+// prepareRawUTF8Flag reproduces the other step CreateHeader performs but
+// CreateRaw skips: marking non-ASCII UTF-8 names as UTF-8. Without the flag
+// readers decode the name as CP437 ("이름" turns into mojibake).
+func prepareRawUTF8Flag(hdr *zip.FileHeader) {
+	if hdr.NonUTF8 {
+		hdr.Flags &^= zipUTF8Flag
+		return
+	}
+	needsUTF8 := func(s string) bool {
+		for i := 0; i < len(s); i++ {
+			if s[i] >= 0x80 {
+				return true
+			}
+		}
+		return false
+	}
+	if (needsUTF8(hdr.Name) || needsUTF8(hdr.Comment)) && utf8.ValidString(hdr.Name) && utf8.ValidString(hdr.Comment) {
+		hdr.Flags |= zipUTF8Flag
+	}
 }
 
 func msDosTime(t time.Time) (date, clock uint16) {
