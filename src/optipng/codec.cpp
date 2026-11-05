@@ -555,7 +555,15 @@ void opng_decode_finish(struct opng_codec_context *context, int free_data)
         opng_init_image(context->image);
     }
     else
+    {
         freer = PNG_USER_WILL_FREE_DATA;
+        /* libpng allocates a 256-byte trans_alpha buffer for every tRNS
+         * chunk, but png_get_tRNS only hands it out for palette images, so
+         * opng_load_image never sees it for RGB/gray color keys. Free it here
+         * while libpng still owns it; otherwise it leaks. */
+        if (png_get_color_type(context->libpng_ptr, context->info_ptr) != PNG_COLOR_TYPE_PALETTE)
+            png_free_data(context->libpng_ptr, context->info_ptr, PNG_FREE_TRNS, -1);
+    }
 
     png_data_freer(context->libpng_ptr, context->info_ptr, freer, PNG_FREE_ALL);
     png_destroy_read_struct(&context->libpng_ptr, &context->info_ptr, 0);
