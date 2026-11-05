@@ -1,16 +1,9 @@
-# Legacy build outputs
-*.o
-*.a
-build/
+# Cargo build output
+/target/
 
-# Go build outputs
-bin/
+# Binaries copied next to the sources
 /ect
 /ect.exe
-*.test
 
 # macOS ancillary files
 .DS_Store
-
-# Rust build outputs
-rust/target/
