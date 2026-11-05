@@ -11,6 +11,11 @@ use crate::replace::replace_with_bytes;
 /// Upper bound for the decoded pixel buffer (1 GiB).
 const MAX_DECODED_BYTES: usize = 1 << 30;
 
+/// Largest canvas accepted (256 megapixels), the same limit as the C/C++ and
+/// Go versions. Checked before the pixel buffer is allocated, so a few
+/// hundred bytes cannot demand gigabytes of memory.
+const MAX_PIXELS: u64 = 1 << 28;
+
 /// Every scanline filter strategy the encoder supports.
 const ALL_FILTERS: [Filter; 7] = [
     Filter::Adaptive,
@@ -40,6 +45,13 @@ pub(crate) fn optimize_png(path: &Path, meta: &Metadata, cfg: &Config) -> io::Re
     let original = fs::read(path)?;
     let before = original.len() as u64;
     let encoded = reencode_png(&original, cfg.level)?;
+    // The encoder writes no metadata: put gAMA/iCCP/pHYs/text/... back
+    // unless -strip was given.
+    let encoded = if cfg.strip {
+        encoded
+    } else {
+        copy_png_metadata(&original, &encoded)?
+    };
     let after = encoded.len() as u64;
     if after >= before {
         return Ok(Outcome::unchanged(before));
@@ -121,17 +133,184 @@ fn decode(data: &[u8]) -> io::Result<Option<Image>> {
         color: info.color_type,
         depth: info.bit_depth,
         palette: info.palette.as_ref().map(|p| p.to_vec()),
-        trns: info.trns.as_ref().map(|t| t.to_vec()),
+        // The decoder normalizes an 8-bit RGB/gray color key to 8-bit
+        // samples (3 or 1 bytes), but the encoder writes `trns` verbatim and
+        // the PNG spec requires 16-bit samples there (6 or 2 bytes). Copy the
+        // chunk payload from the file instead so it round-trips exactly.
+        trns: raw_chunk(data, b"tRNS").map(<[u8]>::to_vec),
         pixels: Vec::new(),
     };
 
+    let pixels = u64::from(info.width) * u64::from(info.height);
+    if pixels > MAX_PIXELS {
+        return Err(to_io(format!(
+            "PNG dimensions {}x{} exceed the {MAX_PIXELS} pixel limit",
+            info.width, info.height
+        )));
+    }
     let size = reader
         .output_buffer_size()
+        .filter(|&s| s <= MAX_DECODED_BYTES)
         .ok_or_else(|| to_io("PNG image is too large"))?;
-    image.pixels = vec![0u8; size];
+    // try_reserve reports allocation failure as an error instead of aborting
+    // the whole process.
+    image.pixels.try_reserve_exact(size).map_err(to_io)?;
+    image.pixels.resize(size, 0);
     let frame = reader.next_frame(&mut image.pixels).map_err(to_io)?;
     image.pixels.truncate(frame.buffer_size());
+    if image.color == png::ColorType::Indexed {
+        let entries = image.palette.as_ref().map_or(0, |p| p.len() / 3);
+        if !indices_in_range(
+            &image.pixels,
+            image.width,
+            image.depth as u8,
+            frame.line_size,
+            entries,
+        ) {
+            return Err(to_io("palette index out of range of the PLTE chunk"));
+        }
+    }
     Ok(Some(image))
+}
+
+/// True if every palette index in the (deinterlaced) indexed pixel rows is
+/// below `entries`. Out-of-range indices make a PNG invalid; decoders differ
+/// in how they show them, so such files are left alone.
+fn indices_in_range(pixels: &[u8], width: u32, bits: u8, line_size: usize, entries: usize) -> bool {
+    if entries >= 1usize << bits || line_size == 0 {
+        return true;
+    }
+    let width = width as usize;
+    let bits = usize::from(bits);
+    let mask = (1usize << bits) - 1;
+    pixels.chunks(line_size).all(|row| {
+        (0..width).all(|x| {
+            let bit = x * bits;
+            let Some(&byte) = row.get(bit / 8) else {
+                return true;
+            };
+            let index = (usize::from(byte) >> (8 - bits - bit % 8)) & mask;
+            index < entries
+        })
+    })
+}
+
+/// Ancillary chunks that must precede PLTE; placed right after IHDR.
+const EARLY_CHUNKS: [&[u8; 4]; 8] = [
+    b"cHRM", b"gAMA", b"iCCP", b"sBIT", b"sRGB", b"cICP", b"mDCV", b"cLLI",
+];
+
+/// Ancillary chunks defined by the PNG specification. Other (private)
+/// chunks are copied only if their "safe to copy" bit is set, as the
+/// specification requires once the image data has been rewritten.
+const KNOWN_ANCILLARY: [&[u8; 4]; 21] = [
+    b"cHRM", b"gAMA", b"iCCP", b"sBIT", b"sRGB", b"cICP", b"mDCV", b"cLLI", b"bKGD", b"hIST",
+    b"pHYs", b"sPLT", b"eXIf", b"tIME", b"tEXt", b"zTXt", b"iTXt", b"oFFs", b"pCAL", b"sCAL",
+    b"sTER",
+];
+
+/// Splits a PNG stream into (type, payload) chunks up to and including IEND.
+fn parse_chunks(data: &[u8]) -> io::Result<Vec<([u8; 4], &[u8])>> {
+    let bad = || to_io("malformed PNG chunk structure");
+    let mut chunks = Vec::new();
+    let mut pos = 8;
+    while pos + 12 <= data.len() {
+        let len = u32::from_be_bytes(data[pos..pos + 4].try_into().map_err(|_| bad())?) as usize;
+        let kind: [u8; 4] = data[pos + 4..pos + 8].try_into().map_err(|_| bad())?;
+        let body = data.get(pos + 8..pos + 8 + len).ok_or_else(bad)?;
+        if data.len() < pos + 12 + len {
+            return Err(bad());
+        }
+        chunks.push((kind, body));
+        pos += 12 + len;
+        if &kind == b"IEND" {
+            return Ok(chunks);
+        }
+    }
+    Err(bad())
+}
+
+/// Returns `encoded` with the ancillary chunks of `original` re-inserted
+/// (the encoder writes only IHDR, PLTE, tRNS, IDAT and IEND). Chunk order
+/// rules are kept: color-space chunks go right after IHDR, chunks that
+/// preceded IDAT go before IDAT, chunks that followed it go before IEND.
+fn copy_png_metadata(original: &[u8], encoded: &[u8]) -> io::Result<Vec<u8>> {
+    let orig = parse_chunks(original)?;
+    let enc = parse_chunks(encoded)?;
+
+    let (mut early, mut before_idat, mut after_idat) = (Vec::new(), Vec::new(), Vec::new());
+    let mut seen_idat = false;
+    for &(kind, body) in &orig {
+        match &kind {
+            b"IHDR" | b"PLTE" | b"tRNS" | b"IEND" => continue,
+            b"IDAT" => {
+                seen_idat = true;
+                continue;
+            }
+            _ => {}
+        }
+        let ancillary = kind[0] & 0x20 != 0;
+        let safe_to_copy = kind[3] & 0x20 != 0;
+        if !ancillary || (!KNOWN_ANCILLARY.contains(&&kind) && !safe_to_copy) {
+            continue;
+        }
+        if EARLY_CHUNKS.contains(&&kind) {
+            early.push((kind, body));
+        } else if seen_idat {
+            after_idat.push((kind, body));
+        } else {
+            before_idat.push((kind, body));
+        }
+    }
+    if early.is_empty() && before_idat.is_empty() && after_idat.is_empty() {
+        return Ok(encoded.to_vec());
+    }
+
+    let mut out = Vec::with_capacity(encoded.len() + original.len() / 4);
+    out.extend_from_slice(&encoded[..8]);
+    let mut write = |kind: &[u8; 4], body: &[u8]| {
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        let mut crc = flate2::Crc::new();
+        crc.update(kind);
+        crc.update(body);
+        out.extend_from_slice(&crc.sum().to_be_bytes());
+    };
+    let mut inserted = false;
+    for &(kind, body) in &enc {
+        match &kind {
+            b"IDAT" if !inserted => {
+                before_idat.iter().for_each(|(k, b)| write(k, b));
+                inserted = true;
+            }
+            b"IEND" => after_idat.iter().for_each(|(k, b)| write(k, b)),
+            _ => {}
+        }
+        write(&kind, body);
+        if &kind == b"IHDR" {
+            early.iter().for_each(|(k, b)| write(k, b));
+        }
+    }
+    Ok(out)
+}
+
+/// Returns the payload of the first `kind` chunk before IDAT, if any.
+fn raw_chunk<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
+    let mut pos = 8; // PNG signature
+    while pos + 8 <= data.len() {
+        let len = u32::from_be_bytes(data[pos..pos + 4].try_into().ok()?) as usize;
+        let name = &data[pos + 4..pos + 8];
+        if name == b"IDAT" {
+            return None;
+        }
+        let body = data.get(pos + 8..pos + 8 + len)?;
+        if name == kind {
+            return Some(body);
+        }
+        pos = pos + 12 + len;
+    }
+    None
 }
 
 fn encode(image: &Image, filter: Filter, zlib_level: u8) -> io::Result<Vec<u8>> {
