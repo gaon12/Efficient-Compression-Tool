@@ -1,10 +1,25 @@
-Efficient Compression Tool
-============================
+Efficient Compression Tool — C/C++
+==================================
 
-Efficient Compression Tool (or ECT) is a C++ file optimizer.  
+Efficient Compression Tool (or ECT) is a C++ file optimizer.
 It supports PNG, JPEG, WebP (non-animated lossless optimization), GZIP and ZIP files.
+**This branch (`cpp`) contains the original C/C++ implementation**, which
+gives the strongest compression (zopfli, optipng, mozjpeg, libwebp).
 
-## Behavior Notes (2026-04-21)
+## Implementations and branches
+
+ECT is maintained as three independent implementations, one per branch.
+All of them share the same command line interface.
+
+| Branch | Implementation | Focus |
+| ------ | -------------- | ----- |
+| [`cpp`](../../tree/cpp)   | C/C++ (this branch) | Maximum compression: zopfli, optipng, mozjpeg, libwebp |
+| [`go`](../../tree/go)     | Go | Pure Go library + CLI, no cgo |
+| [`rust`](../../tree/rust) | Rust | Pure Rust library + CLI, no C toolchain |
+
+`master` only holds the overview and the cross-implementation benchmarks.
+
+## Behavior Notes
 - Type detection uses file signatures (magic bytes) before file extensions.
 - ZIP stored entries are recompressed with Deflate by default if this makes output smaller.
 - `--strict` keeps ZIP stored entries as stored (no stored->deflate conversion).
@@ -15,6 +30,7 @@ It supports PNG, JPEG, WebP (non-animated lossless optimization), GZIP and ZIP f
 ## CLI Notes
 - `--disable-webp`: disable WebP optimization.
 - `--`: treat all following arguments as positional paths, even if they start with `-`.
+- Run `ect -help` for the complete list of options.
 
 Performance (v0.9.7)
 -------------------------
@@ -34,29 +50,48 @@ Benchmarked on 2026-04-21.
 |  ECT -7        |  34,942,246  |   2m 12.3s |
 |  ECT -9        |  34,937,520  |   4m 46.7s |
 
-## Building
-To build ECT, you need to recursively clone it, just downloading isn’t enough, i. e. `git clone --recursive https://github.com/fhanau/Efficient-Compression-Tool.git`  
-You may also need to install `nasm` if it is not available already.
+Comparisons with the Go and Rust implementations on Windows, Linux and
+macOS are published on the `master` branch.
 
-### Command line
-ECT is built with `cmake`  
+## Building
+To build ECT, you need to recursively clone it, just downloading isn’t enough:
+
 ```bash
-mkdir build
-cd build
-cmake ../src
-make
+git clone --recursive -b cpp https://github.com/fhanau/Efficient-Compression-Tool.git
 ```
 
-In addition, you can add the following arguments to the cmake call to turn various features on and off:  
+You also need CMake, a C/C++17 compiler and `nasm` (used by mozjpeg's SIMD
+code). libwebp is optional: when its development files are found, lossless
+WebP optimization is enabled. No system zlib is required; the bundled,
+optimized zlib is used everywhere (including by libpng).
+
+### Command line (Linux, macOS, MinGW)
+```bash
+cmake -S src -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/ect -help
+```
+
+### Visual Studio (MSVC)
+Make sure `nasm.exe` is on `PATH`, then:
+```bash
+cmake -S src -B build -A x64
+cmake --build build --config Release --parallel
+build\Release\ect.exe -help
+```
+Add `-DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`
+to the first command to link the C runtime statically (no Visual C++
+redistributable needed).
+
+### CMake options
 - `-DECT_MULTITHREADING=OFF`: Turn off multithreading support
+- `-DECT_WEBP_SUPPORT=OFF`: Never link libwebp
+- `-DWITH_SIMD=OFF`: Build mozjpeg without assembly (no NASM needed, slower JPEG processing)
 
 ### With Xcode
-You can use cmake to generate an Xcode project.  Just add `-G Xcode` to the end of the cmake command:
+You can use cmake to generate an Xcode project.  Just add `-G Xcode` to the cmake configure command:
 ```bash
-mkdir build
-cd build
-cmake ../src -G Xcode
-make
+cmake -S src -B build -G Xcode
 ```
 You will run into a slight issue in that Xcode doesn't know how to compile some of the asm files within mozjpeg.  To fix this, locate your copy of `nasm` (`/usr/local/bin/nasm` in the example) navigate to the Build Rules of the `simd` target, and add a custom rule to process source files matching `*.asm` with the following script:
 ```sh
@@ -65,3 +100,10 @@ You will run into a slight issue in that Xcode doesn't know how to compile some 
 and set `$(BUILT_PRODUCTS_DIR)/x86_64/${INPUT_FILE_BASE}.o` as the output files.
 
 If you are using Xcode for development and do not need maximum speed, you can also disable the asm files by adding `-DWITH_SIMD=OFF` to the cmake.
+
+## Releases
+C/C++ releases are tagged `cpp-vX.Y.Z`. Each release contains
+`ect-cpp_<tag>_<os>_<arch>` archives (Linux amd64/arm64, macOS arm64,
+Windows amd64 with a static runtime) and a `checksums.txt` with SHA-256
+sums. Release binaries are built without WebP support so they have no
+runtime dependency on libwebp.

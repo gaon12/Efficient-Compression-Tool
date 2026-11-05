@@ -1,24 +1,55 @@
-To build ECT, you need to recursively clone it, just downloading isn’t enough, i. e. git clone --recursive https://github.com/fhanau/Efficient-Compression-Tool.git
+Building ECT (C/C++)
+====================
 
-CMake Build:
-ECT is built with cmake
-mkdir build
-cd build
-cmake ../src
-make
+This branch (`cpp`) contains the C/C++ implementation of ECT. The Go and
+Rust implementations live on the `go` and `rust` branches.
+
+To build ECT, you need to recursively clone it, just downloading isn't
+enough:
+
+    git clone --recursive -b cpp https://github.com/fhanau/Efficient-Compression-Tool.git
+    # or, in an existing clone:
+    git submodule update --init --recursive
+
+Dependencies:
+- CMake 3.10+
+- A C11 / C++17 compiler (GCC, Clang/AppleClang, MinGW-w64 or MSVC)
+- NASM (mozjpeg SIMD code; not needed with -DWITH_SIMD=OFF)
+- Optional: libwebp + libwebpmux development files (lossless WebP)
+No system zlib is needed: the bundled zlib is used, also by libpng.
+
+CMake build (Linux, macOS, MinGW):
+
+    cmake -S src -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build --parallel
+
+CMake build (Visual Studio / MSVC, nasm.exe on PATH):
+
+    cmake -S src -B build -A x64
+    cmake --build build --config Release --parallel
+
+Static MSVC runtime (no Visual C++ redistributable needed), add to the
+configure command:
+
+    -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+
+CMake options:
+- -DECT_MULTITHREADING=OFF   disable multithreading support
+- -DECT_WEBP_SUPPORT=OFF     never link libwebp
+- -DWITH_SIMD=OFF            build mozjpeg without assembly
+
+Smoke test of a built binary (needs bash; python is optional):
+
+    bash .github/scripts/smoke-test.sh build/ect
 
 Makefile Build (deprecated and unsupported):
 Use the Makefile to build dependencies and the binary:
 cd src/
 make
 
-Dependencies:
-CMake
-Make
-NASM
+Tested Operating Systems and Compilers (CI, see .github/workflows/cpp.yml):
+- Ubuntu x86_64 and ARM64 (GCC)
+- macOS Apple Silicon (AppleClang)
+- Windows x64 (MSVC and MSYS2/MinGW-w64 GCC)
 
-Tested Operating Systems and Compilers:
-Debian Wheezy (GCC)
-Mac OS X 10.10 (GCC and LLVM/Clang)
-Windows 8 (MinGW)
-For using other compilers than GCC, you may need to change the Makefile.
+Releases: pushing a `cpp-vX.Y.Z` tag runs .github/workflows/release.yml.
