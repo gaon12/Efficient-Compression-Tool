@@ -566,6 +566,13 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
     cd_header.local_header_offset = static_cast<uint64_t>(p_write - fp_w_base);
 
     LocalHeader local_header_out = local_header_in;
+    // Readers take the method and the flags from the central directory, so
+    // a local header that disagrees must not decide how the entry is handled
+    // (and must not be copied into the new central directory). Only bit 3,
+    // which says whether a data descriptor follows this local entry, is
+    // about the local layout.
+    local_header_out.compression_method = cd_header.header.compression_method;
+    local_header_out.flag = static_cast<uint16_t>((cd_header.header.flag & ~8U) | (local_header_in.flag & 8U));
     local_header_out.extra_field_len = 0;
     if (local_header_out.flag & 8) {
       // set this bit to 0, we don't use data descriptor to save space
@@ -720,7 +727,7 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
       }
     }
 
-    if (final_method != local_header_in.compression_method || final_compressed_size != cd_header.compressed_size ||
+    if (final_method != cd_header.header.compression_method || final_compressed_size != cd_header.compressed_size ||
         final_crc != cd_header.header.crc32) {
       recompressed = true;
     }
