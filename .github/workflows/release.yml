@@ -1,6 +1,6 @@
 # Publishes Rust release binaries of ECT.
 #
-# Triggered by tags of the form `rust-v*` (e.g. rust-v0.1.0), so releases of
+# Triggered by tags of the form `rust-v*` (e.g. rust-v0.11.0), so releases of
 # the Go, Rust and C/C++ branches never collide.
 # Asset naming: ect-rust_<tag>_<os>_<arch>.(zip|tar.gz), plus checksums.txt.
 name: release
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. rust-v0.1.0)'
+        description: 'Release tag (e.g. rust-v0.11.0)'
         required: true
       prerelease:
         description: 'Mark as prerelease'
