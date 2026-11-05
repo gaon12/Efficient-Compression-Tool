@@ -27,6 +27,20 @@ pub(crate) fn optimize_existing_zip(
 ) -> io::Result<Outcome> {
     let before = meta.len();
     let mut archive = ZipArchive::new(BufReader::new(File::open(path)?)).map_err(zip_err)?;
+    // The zip crate indexes entries by name, so entries sharing a name
+    // collapse into one; rewriting would silently drop the others.
+    if let Some(declared) = declared_entry_count(path)?
+        && declared != archive.len() as u64
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "archive declares {declared} entries but {} unique names were read \
+                 (duplicate entry names?), left unchanged",
+                archive.len()
+            ),
+        ));
+    }
 
     let mut tmp = TempFile::new_in(parent_dir(path), "zip")?;
     {
@@ -53,6 +67,29 @@ pub(crate) fn optimize_existing_zip(
     }
     tmp.persist(path, Some(meta), cfg.keep_mod_time)?;
     Ok(Outcome::changed(before, after))
+}
+
+/// Total entry count from the end-of-central-directory record, or `None` if
+/// it is not available in the classic record (ZIP64 archives store 0xFFFF
+/// there).
+fn declared_entry_count(path: &Path) -> io::Result<Option<u64>> {
+    const EOCD_LEN: u64 = 22;
+    const MAX_COMMENT: u64 = 0xFFFF;
+    let mut f = File::open(path)?;
+    let len = f.metadata()?.len();
+    let tail_len = len.min(EOCD_LEN + MAX_COMMENT);
+    f.seek(io::SeekFrom::Start(len - tail_len))?;
+    let mut tail = vec![0u8; usize::try_from(tail_len).map_err(io::Error::other)?];
+    f.read_exact(&mut tail)?;
+    let Some(pos) = tail
+        .windows(4)
+        .rposition(|w| w == b"PK\x05\x06")
+        .filter(|&p| p + 22 <= tail.len())
+    else {
+        return Ok(None);
+    };
+    let total = u16::from_le_bytes([tail[pos + 10], tail[pos + 11]]);
+    Ok((total != 0xFFFF).then_some(u64::from(total)))
 }
 
 fn copy_entry<R: Read + Seek, W: Write + Seek>(
