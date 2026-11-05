@@ -8,7 +8,11 @@
 # - zip mode: packs a directory and verifies the archive with `unzip -t`
 #   when unzip is available,
 # - PNG: recompresses a PNG stored without compression and checks that it
-#   shrank (needs python3 or python to generate the input).
+#   shrank,
+# - ZIP re-optimization: rewrites a ZIP whose entries are stored
+#   (uncompressed) at -1 and -3 and checks that every entry still has the
+#   original content (-1 used to corrupt such archives with MSVC builds).
+# The last two need python3 or python to generate and verify the inputs.
 set -euo pipefail
 
 ect="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
@@ -67,3 +71,26 @@ before=$(wc -c < image.png)
 after=$(wc -c < image.png)
 test "$after" -lt "$before"
 echo "png: ok ($before -> $after bytes)"
+
+# Stored -> Deflate re-optimization for both level families: -1 uses zlib,
+# -2..-9 use Zopfli.
+for level in 1 3; do
+  "$py" - <<'PY'
+import zipfile
+with zipfile.ZipFile("stored.zip", "w", zipfile.ZIP_STORED) as z:
+    z.write("original.txt", "a.txt")
+    z.writestr("b.txt", b"small\n")
+PY
+  before=$(wc -c < stored.zip)
+  "$ect" -quiet -$level -zip stored.zip
+  after=$(wc -c < stored.zip)
+  test "$after" -lt "$before"
+  "$py" - <<'PY'
+import zipfile
+with zipfile.ZipFile("stored.zip") as z:
+    assert z.testzip() is None, "CRC mismatch"
+    assert z.read("a.txt") == open("original.txt", "rb").read()
+    assert z.read("b.txt") == b"small\n"
+PY
+  echo "zip -$level re-optimize: ok ($before -> $after bytes)"
+done

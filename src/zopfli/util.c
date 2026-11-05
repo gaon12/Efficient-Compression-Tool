@@ -19,6 +19,7 @@ Author: jyrki.alakuijala@gmail.com (Jyrki Alakuijala)
 
 /*Modified by Felix Hanau*/
 
+#include <string.h>
 #include "util.h"
 #include "zopfli.h"
 
@@ -225,6 +226,9 @@ static const ZopfliOptionsMin opt[8] =
 };
 
 void ZopfliInitOptions(ZopfliOptions* options, unsigned _mode, unsigned multithreading, unsigned isPNG) {
+  /* Start from a fully defined state: mode 1 returns early below and must
+     never leave fields uninitialized. */
+  memset(options, 0, sizeof(*options));
   options->twice = (_mode - (_mode % 10000)) / 10000;
   unsigned mode = _mode % 10000 > 9 ? 9 : _mode % 10000;
   if (mode < 2){

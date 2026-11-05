@@ -597,7 +597,7 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
             }
           }
           if (compress_buf) {
-            delete[] compress_buf;
+            free(compress_buf);  // allocated with malloc/realloc by ZopfliBuffer
           }
           if (!stored_as_deflate) {
             final_method = 0;
@@ -678,7 +678,7 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
         }
 
         free(decompress_buf);
-        delete[] compress_buf;
+        free(compress_buf);  // allocated with malloc/realloc by ZopfliBuffer
       }
     }
 

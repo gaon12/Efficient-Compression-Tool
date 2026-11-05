@@ -19,6 +19,8 @@ Author: jyrki.alakuijala@gmail.com (Jyrki Alakuijala)
 */
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <sys/stat.h>
 
 #include "zopfli.h"
@@ -161,30 +163,8 @@ static void ZopfliGzipCompress(unsigned mode, unsigned multithreading,
     (*outsize) += name_size;
   }
 
-  //Use zlib-based compression
-  if (mode == 1) {
-    z_stream stream;
-    stream.zalloc = 0;
-    stream.zfree = 0;
-    stream.opaque = 0;
-
-    int err = deflateInit2(&stream, 9, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY);
-    if (err != Z_OK) exit(EXIT_FAILURE);
-
-    stream.next_in = (z_const unsigned char *)in;
-    stream.avail_in = insize;
-    stream.avail_out = deflateBound(&stream, insize);
-    (*out) = (unsigned char*)realloc(*out, (*outsize) + deflateBound(&stream, insize) + 8);
-    stream.next_out = &((*out)[*outsize]);
-
-    deflate(&stream, Z_FINISH);
-    deflateEnd(&stream);
-    (*outsize) += stream.total_out;
-  }
-  else {
-    ZopfliBuffer(mode, multithreading, in, insize, out, outsize);
-    (*out) = (unsigned char*)realloc(*out, *outsize + 8);
-  }
+  ZopfliBuffer(mode, multithreading, in, insize, out, outsize);
+  (*out) = (unsigned char*)realloc(*out, *outsize + 8);
 
   /* CRC */
   *(unsigned*)(&(*out)[*outsize]) = crcvalue; (*outsize) += 4;
@@ -306,7 +286,57 @@ int ZopfliGzip(const char* infilename, const char* outfilename, unsigned mode, u
   return EXIT_SUCCESS;
 }
 
+// Largest input handled by the single-call zlib path below. zlib's avail_in,
+// avail_out and deflateBound() are 32-bit on some platforms (uInt / uLong
+// on Windows), so larger inputs use the fastest Zopfli mode instead.
+static const size_t kMaxZlibInput = (size_t)1 << 30;
+
+// Appends a raw Deflate stream (no zlib/gzip framing) of `in` produced by
+// zlib at level 9 to (*out, *outsize). This is ECT's mode 1 ("-1").
+static void ZlibDeflateRaw(const unsigned char* in, size_t insize, unsigned char** out, size_t* outsize) {
+  z_stream stream;
+  memset(&stream, 0, sizeof(stream));
+  if (deflateInit2(&stream, 9, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+    fprintf(stderr, "Error: zlib initialization failed\n");
+    exit(EXIT_FAILURE);
+  }
+  const uLong bound = deflateBound(&stream, (uLong)insize);
+  unsigned char* grown = (unsigned char*)realloc(*out, *outsize + bound);
+  if (!grown) {
+    fprintf(stderr, "Error: out of memory\n");
+    exit(EXIT_FAILURE);
+  }
+  *out = grown;
+
+  stream.next_in = (z_const unsigned char*)in;
+  stream.avail_in = (uInt)insize;
+  stream.next_out = *out + *outsize;
+  stream.avail_out = (uInt)bound;
+  if (deflate(&stream, Z_FINISH) != Z_STREAM_END) {
+    fprintf(stderr, "Error: zlib compression failed\n");
+    exit(EXIT_FAILURE);
+  }
+  *outsize += stream.total_out;
+  deflateEnd(&stream);
+}
+
+// Appends a raw Deflate stream of `in` to (*out, *outsize), which must be
+// either (nullptr, 0) or a malloc'ed buffer. Every caller (gzip, ZIP
+// creation, ZIP re-optimization) goes through here, so all of them get the
+// same handling of mode 1.
 void ZopfliBuffer(unsigned mode, unsigned multithreading, const unsigned char* in, size_t insize, unsigned char** out, size_t* outsize) {
+  if (mode % 10000 < 2) {
+    // ZopfliInitOptions() deliberately leaves Zopfli unconfigured for mode 1
+    // because that mode is meant to use zlib. Passing those options to
+    // ZopfliDeflate() used uninitialized fields (undefined behavior): with
+    // MSVC, ZIP re-optimization at -1 hung or wrote corrupt entries.
+    if (insize <= kMaxZlibInput) {
+      ZlibDeflateRaw(in, insize, out, outsize);
+      return;
+    }
+    mode = mode - mode % 10000 + 2;
+  }
+
   ZopfliOptions options;
   ZopfliInitOptions(&options, mode, multithreading, 0);
   unsigned char bp = 0;
