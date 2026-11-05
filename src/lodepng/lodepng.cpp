@@ -4749,15 +4749,6 @@ unsigned decode(unsigned char** out, size_t& buffersize, unsigned& w, unsigned& 
 #endif /* LODEPNG_COMPILE_DISK */
 
 #ifdef LODEPNG_COMPILE_ENCODER
-unsigned filterEstimated(unsigned char* out, const unsigned char* in, unsigned h,
-                         size_t linebytes, size_t bytewidth) {
-  return ::filterEstimated(out, in, h, linebytes, bytewidth, false, true);
-}
-
-double estimateDeflate(const unsigned char* data, size_t size) {
-  return filter_estimator::FilterEstimator::estimate(data, size);
-}
-
 unsigned encode(std::vector<unsigned char>& out,
                 const unsigned char* in, size_t insize, unsigned w, unsigned h,
                 State& state, LodePNGPaletteSettings p) {

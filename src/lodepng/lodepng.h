@@ -668,13 +668,6 @@ unsigned decode(unsigned char** out, size_t& buffersize, unsigned& w, unsigned& 
 unsigned encode(std::vector<unsigned char>& out,
                 const unsigned char* in, size_t insize, unsigned w, unsigned h,
                 State& state, LodePNGPaletteSettings p);
-
-/* Filters h rows of linebytes bytes each like LFS_ESTIMATE does; out gets
-(linebytes + 1) * h bytes, each row prefixed with its filter type. */
-unsigned filterEstimated(unsigned char* out, const unsigned char* in, unsigned h,
-                         size_t linebytes, size_t bytewidth);
-/* Estimated deflate size in bytes of the given data. */
-double estimateDeflate(const unsigned char* data, size_t size);
 #endif /*LODEPNG_COMPILE_ENCODER*/
 
 #ifdef LODEPNG_COMPILE_DISK
