@@ -74,6 +74,11 @@ pub(crate) fn optimize_existing_gzip(
         io::copy(&mut decoder, &mut encoder)?;
         encoder.finish()?;
     }
+    // Close the source before it is replaced. Rust opens files with
+    // FILE_SHARE_DELETE on Windows so the rename would usually succeed
+    // anyway, but other processes (antivirus, indexers) and network file
+    // systems are less forgiving; never rely on replacing an open file.
+    drop(decoder);
     let after = tmp.close()?;
     if after >= before {
         return Ok(Outcome::unchanged(before));

@@ -226,3 +226,26 @@ fn symlinks_are_never_replaced() {
     assert!(!dir.join("link.txt.gz").exists());
     assert!(dir.join("real.txt.gz").exists());
 }
+
+#[test]
+fn zip_optimization_preserves_modification_time() {
+    let modified = zip::DateTime::from_date_and_time(2021, 6, 15, 10, 30, 42).unwrap();
+    let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .last_modified_time(modified);
+    w.start_file("a.txt", opts).unwrap();
+    w.write_all(&compressible_text()).unwrap();
+    let dir = scratch_dir("zip-mtime");
+    let path = dir.join("ts.zip");
+    fs::write(&path, w.finish().unwrap().into_inner()).unwrap();
+
+    let report = ect::process(quiet(), &[&path]);
+    assert!(!report.has_errors(), "{:?}", report.errors);
+    assert!(report.saved_bytes > 0);
+
+    let mut archive = zip::ZipArchive::new(fs::File::open(&path).unwrap()).unwrap();
+    let entry = archive.by_index(0).unwrap();
+    assert_eq!(entry.compression(), zip::CompressionMethod::Deflated);
+    assert_eq!(entry.last_modified(), Some(modified));
+}
