@@ -179,14 +179,13 @@ impl Processor {
                 files.insert(path.clone());
                 continue;
             }
-            if !self.cfg.recursive {
-                rb.add_error(
-                    path,
-                    io::Error::other("is a directory (use -recurse to process its files)"),
-                );
-                continue;
+            if self.cfg.recursive {
+                walk_dir(path, &mut files, rb);
+            } else {
+                // Same as the C/C++ version: without -recurse a directory
+                // argument means the regular files directly inside it.
+                list_dir_files(path, &mut files, rb);
             }
-            walk_dir(path, &mut files, rb);
         }
         files.into_iter().collect()
     }
@@ -256,6 +255,28 @@ impl Processor {
 fn is_regular_zip_file(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
         && matches!(detect_file_type(path), Ok(FileType::Zip))
+}
+
+/// Adds the regular files directly inside `dir` (no subdirectories, no
+/// symlinks).
+fn list_dir_files(dir: &Path, files: &mut BTreeSet<PathBuf>, rb: &ResultBuilder) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            rb.add_error(dir, e);
+            return;
+        }
+    };
+    for entry in entries {
+        match entry {
+            Ok(e) => {
+                if e.file_type().is_ok_and(|t| t.is_file()) {
+                    files.insert(e.path());
+                }
+            }
+            Err(e) => rb.add_error(dir, e),
+        }
+    }
 }
 
 fn walk_dir(dir: &Path, files: &mut BTreeSet<PathBuf>, rb: &ResultBuilder) {

@@ -202,14 +202,6 @@ fn png_is_reencoded_losslessly() {
     assert_eq!(&buf[..n], &pixels[..]);
 }
 
-#[test]
-fn directories_require_recurse() {
-    let dir = scratch_dir("recurse");
-    fs::write(dir.join("x.txt"), b"x").unwrap();
-    let report = ect::process(quiet(), &[&dir]);
-    assert_eq!(report.errors.len(), 1);
-}
-
 #[cfg(unix)]
 #[test]
 fn symlinks_are_never_replaced() {
@@ -284,4 +276,33 @@ fn zip_mode_reoptimizes_existing_archive_in_place() {
     assert!(fs::metadata(&path).unwrap().len() < before);
     assert!(!dir.join("a.zip.zip").exists());
     assert_eq!(read_zip(&path), vec![("a.txt".to_string(), text)]);
+}
+
+/// Without -recurse a directory argument means the files directly inside
+/// it (as in the C/C++ version); -recurse also descends into subdirectories.
+#[test]
+fn directory_without_recurse_processes_top_level_files() {
+    let dir = scratch_dir("dir");
+    fs::create_dir_all(dir.join("sub")).unwrap();
+    fs::write(dir.join("top.txt"), compressible_text()).unwrap();
+    fs::write(dir.join("sub").join("deep.txt"), compressible_text()).unwrap();
+
+    let cfg = Config {
+        gzip_mode: true,
+        ..quiet()
+    };
+    let report = ect::process(cfg.clone(), &[&dir]);
+    assert!(!report.has_errors(), "{:?}", report.errors);
+    assert!(dir.join("top.txt.gz").exists());
+    assert!(!dir.join("sub").join("deep.txt.gz").exists());
+
+    // Start the recursive pass from a clean slate (top.txt.gz exists now).
+    fs::remove_file(dir.join("top.txt.gz")).unwrap();
+    let cfg = Config {
+        recursive: true,
+        ..cfg
+    };
+    let report = ect::process(cfg, &[&dir]);
+    assert!(!report.has_errors(), "{:?}", report.errors);
+    assert!(dir.join("sub").join("deep.txt.gz").exists());
 }
