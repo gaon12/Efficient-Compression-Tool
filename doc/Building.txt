@@ -1,22 +1,38 @@
-Build ECT (Go)
-==============
+Building ECT (Go)
+=================
 
-ECT is now built with Go.
-No CMake/NASM toolchain is required.
+This branch (`go`) contains the pure Go implementation of ECT. No cgo, CMake
+or NASM is required. The C/C++ and Rust implementations live on the `cpp`
+and `rust` branches.
 
 Requirements:
 - Go 1.22+
 
-Build:
-```bash
-go build ./...
-```
+Build the CLI:
+
+    go build -o ect ./cmd/ect
 
 Run from source:
-```bash
-go run ./cmd/ect -help
-```
+
+    go run ./cmd/ect -help
+
+Checks used by CI (.github/workflows/go.yml):
+
+    gofmt -l .          # must print nothing
+    go vet ./...
+    go test ./...       # CI adds -race on Linux
+
+Benchmarks:
+
+    go test -run xxx -bench . -benchmem ./pkg/ect
+
+Cross-compilation (any GOOS/GOARCH supported by Go):
+
+    GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ect.exe ./cmd/ect
 
 Project layout:
-- `pkg/ect`: importable Go library
-- `cmd/ect`: CLI wrapper around `pkg/ect`
+- pkg/ect: importable Go library
+- cmd/ect: CLI wrapper around pkg/ect
+
+Releases: pushing a `go-vX.Y.Z` tag runs .github/workflows/release.yml, which
+builds Windows/macOS/Linux binaries for amd64 and arm64 and publishes them.

@@ -1,7 +1,12 @@
-Third-Party License Notes
-=========================
+Third-Party License Notes (Go branch)
+====================================
 
-As of the pure-Go rewrite, the runtime compression engine uses only Go standard library packages.
-No bundled C/C++ third-party compression sources are shipped in this repository.
+ECT is licensed under the Apache License 2.0 (see License.txt).
 
-Historical license texts are kept in this folder for archival/reference purposes.
+The Go implementation on this branch uses only the Go standard library
+(Copyright The Go Authors, BSD 3-Clause License). No third-party Go modules
+and no bundled C/C++ sources are used.
+
+The other license texts in this folder belong to the bundled C/C++
+libraries of the `cpp` branch (mozjpeg, zopfli/Apache-2.0, FSE, fast_zlib)
+and are kept for reference.
