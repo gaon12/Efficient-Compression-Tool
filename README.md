@@ -31,11 +31,11 @@ All of them share the same command line interface.
 
 | Format | Behavior |
 | ------ | -------- |
-| PNG    | Lossless re-encode with the Go PNG encoder at best compression (images above 256 megapixels are refused) |
+| PNG    | Lossless re-encode with the Go PNG encoder at best compression; metadata chunks (gAMA, iCCP, pHYs, text, ...) are kept unless `-strip`; APNG, invalid palettes and images above 256 megapixels are left untouched |
 | JPEG   | Removal of APPn/COM metadata segments with `-strip`; pixel data untouched |
 | WebP   | Detected and parsed; animated WebP is skipped; no re-encode |
 | GZIP   | Re-compress existing `.gz` (header kept); `-gzip` creates `<file>.gz` |
-| ZIP    | Re-deflate entries (stored entries become deflated unless `--strict`); `-zip` creates `<path>.zip` for files and directories and re-optimizes existing archives in place |
+| ZIP    | Only with `-zip`: re-deflate entries (stored entries become deflated unless `--strict`; damaged archives are refused); `-zip` creates `<path>.zip` for files and directories and re-optimizes existing archives in place |
 
 ## CLI
 
@@ -47,9 +47,9 @@ ect [options] files/folders...
 | ------ | ------- |
 | `-1` ... `-9` | Compression level (default `-3`) |
 | `-strip` | Strip metadata where the format allows |
-| `-recurse` | Recursively process directories |
-| `-gzip` | Optimize `.gz` files and compress other files to `<file>.gz` |
-| `-zip` | Create `<path>.zip` for every given file or directory; existing ZIP archives are re-optimized in place (same as the C/C++ version) |
+| `-recurse` | Also descend into subdirectories (without it, a directory argument means the files directly inside it) |
+| `-gzip` | Compress every file to `<file>.gz` (images too, the original is kept); existing `.gz` files are re-optimized in place |
+| `-zip` | Create `<path>.zip` for every given file or directory; existing ZIP archives are re-optimized in place. Without `-zip`, ZIP-based files (`.jar`, `.apk`, `.docx`, `.epub`, ...) are never modified |
 | `-keep` | Keep the original modification time |
 | `-quiet` | Print only errors |
 | `--disable-png`, `--disable-jpg`, `--disable-webp` | Skip a format |
@@ -59,6 +59,16 @@ ect [options] files/folders...
 
 Flags of the C/C++ version (`-progressive`, `-autorotate`, `--mt-deflate`,
 `--reuse`, `--allfilters*`, `--pal_sort=N`) are accepted and ignored.
+
+Differences from the C/C++ version:
+
+- `-zip` with several arguments creates one archive per argument; the
+  C/C++ version packs all arguments into a single archive named after the
+  first one.
+- Symbolic links are reported as errors and never followed; the C/C++
+  version optimizes the file a link points to.
+- Empty files cannot be gzipped (as in the C/C++ version) and are reported
+  as errors.
 
 Exit codes: `0` success, `1` no input paths, `2` invalid options or at least
 one file failed.
