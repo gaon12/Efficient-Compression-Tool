@@ -215,3 +215,18 @@ fn zip_with_duplicate_names_is_left_unchanged() {
     assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
     assert_eq!(fs::read(&path).unwrap(), data);
 }
+
+#[test]
+fn ancillary_chunk_with_bad_crc_is_rejected() {
+    // The png crate does not verify CRCs of ancillary chunks; re-encoding
+    // would give the damaged tRNS a fresh CRC and hide the damage.
+    let mut src = rgb_png(Some(&[0, 10, 0, 20, 0, 30]));
+    let trns = src.windows(4).position(|w| w == b"tRNS").unwrap();
+    src[trns + 5] ^= 0x40;
+    let dir = scratch_dir("crc");
+    let path = dir.join("a.png");
+    fs::write(&path, &src).unwrap();
+    let report = ect::process(quiet(), &[&path]);
+    assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
+    assert_eq!(fs::read(&path).unwrap(), src);
+}

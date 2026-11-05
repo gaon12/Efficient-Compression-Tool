@@ -44,6 +44,10 @@ fn to_io(e: impl std::fmt::Display) -> io::Error {
 pub(crate) fn optimize_png(path: &Path, meta: &Metadata, cfg: &Config) -> io::Result<Outcome> {
     let original = fs::read(path)?;
     let before = original.len() as u64;
+    // The png crate skips CRC checks of ancillary chunks, so a damaged tRNS
+    // or text chunk would be re-encoded with a fresh, valid CRC and the
+    // damage would become invisible. Verify every chunk up front.
+    parse_chunks(&original)?;
     let encoded = reencode_png(&original, cfg.level)?;
     // The encoder writes no metadata: put gAMA/iCCP/pHYs/text/... back
     // unless -strip was given.
@@ -209,7 +213,8 @@ const KNOWN_ANCILLARY: [&[u8; 4]; 21] = [
     b"sTER",
 ];
 
-/// Splits a PNG stream into (type, payload) chunks up to and including IEND.
+/// Splits a PNG stream into (type, payload) chunks up to and including IEND,
+/// verifying every chunk's CRC.
 fn parse_chunks(data: &[u8]) -> io::Result<Vec<([u8; 4], &[u8])>> {
     let bad = || to_io("malformed PNG chunk structure");
     let mut chunks = Vec::new();
@@ -218,8 +223,15 @@ fn parse_chunks(data: &[u8]) -> io::Result<Vec<([u8; 4], &[u8])>> {
         let len = u32::from_be_bytes(data[pos..pos + 4].try_into().map_err(|_| bad())?) as usize;
         let kind: [u8; 4] = data[pos + 4..pos + 8].try_into().map_err(|_| bad())?;
         let body = data.get(pos + 8..pos + 8 + len).ok_or_else(bad)?;
-        if data.len() < pos + 12 + len {
-            return Err(bad());
+        let stored = data.get(pos + 8 + len..pos + 12 + len).ok_or_else(bad)?;
+        let mut crc = flate2::Crc::new();
+        crc.update(&kind);
+        crc.update(body);
+        if crc.sum().to_be_bytes() != stored {
+            return Err(to_io(format!(
+                "CRC error in the {} chunk",
+                String::from_utf8_lossy(&kind)
+            )));
         }
         chunks.push((kind, body));
         pos += 12 + len;
