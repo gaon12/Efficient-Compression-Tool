@@ -200,7 +200,14 @@ impl Processor {
             if meta.file_type().is_symlink() {
                 return Err(io::Error::other("symbolic links are not processed"));
             }
-            let kind = detect_file_type(path)?;
+            let mut kind = detect_file_type(path)?;
+            // -gzip means "compress every file to <name>.gz", as in the
+            // C/C++ version: images are gzipped too rather than optimized in
+            // place. Only existing gzip files are re-optimized (and, under
+            // -zip, ZIP archives).
+            if cfg.gzip_mode && !cfg.zip_mode && kind != FileType::Gzip {
+                kind = FileType::Unknown;
+            }
             let (label, outcome) = match kind {
                 FileType::Png if !cfg.disable_png => {
                     ("PNG optimized", png_opt::optimize_png(path, &meta, cfg)?)
