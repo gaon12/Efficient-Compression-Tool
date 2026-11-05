@@ -31,6 +31,14 @@ Author: jyrki.alakuijala@gmail.com (Jyrki Alakuijala)
 #include "../main.h"
 #include <time.h>
 
+/* Stores a 32-bit gzip header/trailer field in little-endian order. */
+static void PutLE32(unsigned char* p, unsigned long v) {
+  p[0] = (unsigned char)(v & 0xFF);
+  p[1] = (unsigned char)((v >> 8) & 0xFF);
+  p[2] = (unsigned char)((v >> 16) & 0xFF);
+  p[3] = (unsigned char)((v >> 24) & 0xFF);
+}
+
 #define ZOPFLI_APPEND_DATA(/* T */ value, /* T** */ data, /* size_t* */ size) {\
 (*data)[(*size)] = (value);\
 (*size)++;\
@@ -152,7 +160,7 @@ static void ZopfliGzipCompress(unsigned mode, unsigned multithreading,
   (*out)[*outsize] = has_name << 3; (*outsize)++; /* FLG */
 
   /* MTIME */
-  *(unsigned*)(&(*out)[*outsize]) = time & UINT_MAX; (*outsize) += 4;
+  PutLE32(&(*out)[*outsize], (unsigned long)time); (*outsize) += 4;
 
   (*out)[*outsize] = 2; (*outsize)++;  /* XFL, 2 indicates best compression. */
   (*out)[*outsize] = 3; (*outsize)++;  /* OS follows Unix conventions. */
@@ -167,10 +175,10 @@ static void ZopfliGzipCompress(unsigned mode, unsigned multithreading,
   (*out) = (unsigned char*)realloc(*out, *outsize + 8);
 
   /* CRC */
-  *(unsigned*)(&(*out)[*outsize]) = crcvalue; (*outsize) += 4;
+  PutLE32(&(*out)[*outsize], (unsigned long)crcvalue); (*outsize) += 4;
 
   /* ISIZE */
-  *(unsigned*)(&(*out)[*outsize]) = insize % UINT_MAX; (*outsize) += 4;
+  PutLE32(&(*out)[*outsize], (unsigned long)(insize & 0xFFFFFFFFu)); (*outsize) += 4;
 }
 
 static void LoadGzip(const char* filename, unsigned char** out, long long* outsize_p) {
