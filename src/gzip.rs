@@ -6,7 +6,7 @@ use std::time::UNIX_EPOCH;
 use flate2::read::MultiGzDecoder;
 use flate2::{Compression, GzBuilder};
 
-use crate::config::Config;
+use crate::config::{Config, deflate_level};
 use crate::processor::Outcome;
 use crate::replace::{TempFile, parent_dir, set_mod_time};
 
@@ -17,8 +17,8 @@ fn other(msg: &str) -> io::Error {
     io::Error::other(msg.to_string())
 }
 
-pub(crate) fn compression(level: u32) -> Compression {
-    Compression::new(level.clamp(1, 9))
+fn compression(level: u32) -> Compression {
+    Compression::new(deflate_level(level))
 }
 
 /// Re-compresses an existing gzip file, keeping its header fields.

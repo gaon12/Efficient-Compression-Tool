@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use zip::write::{FileOptionExtension, FileOptions, SimpleFileOptions};
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
-use crate::config::Config;
+use crate::config::{Config, deflate_level};
 use crate::processor::Outcome;
 use crate::replace::{TempFile, parent_dir};
 
@@ -93,7 +93,7 @@ fn apply_method<'k, 'n, T: FileOptionExtension>(
         .compression_method(method)
         .large_file(size >= ZIP64_THRESHOLD);
     if method == CompressionMethod::Deflated {
-        options.compression_level(Some(i64::from(cfg.level.clamp(1, 9))))
+        options.compression_level(Some(i64::from(deflate_level(cfg.level))))
     } else {
         options.compression_level(None)
     }

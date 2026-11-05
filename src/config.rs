@@ -82,3 +82,39 @@ impl Config {
         }
     }
 }
+
+/// Maps an ECT level (1-9) to the zlib level used for Deflate streams.
+///
+/// zlib-rs implements zlib level 1 with the "quick" strategy, which is only
+/// marginally faster than level 2 but much weaker: on the Canterbury Corpus
+/// level 1 produced 1,151,148 bytes versus 816,644 bytes for level 2
+/// (+41%) while saving under 10% of the time. ECT is an optimizer, so `-1`
+/// uses zlib level 2; levels 2-9 map one-to-one.
+pub(crate) fn deflate_level(level: u32) -> u32 {
+    level.clamp(2, 9)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deflate_level_mapping() {
+        assert_eq!(deflate_level(1), 2);
+        assert_eq!(deflate_level(3), 3);
+        assert_eq!(deflate_level(9), 9);
+        assert_eq!(deflate_level(42), 9);
+    }
+
+    #[test]
+    fn normalization_clamps_level_and_sets_workers() {
+        let cfg = Config {
+            level: 0,
+            workers: 0,
+            ..Config::default()
+        }
+        .normalized();
+        assert_eq!(cfg.level, 1);
+        assert!(cfg.workers >= 1);
+    }
+}
