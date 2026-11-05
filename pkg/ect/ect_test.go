@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -308,10 +310,68 @@ func TestPNGReencodeIsLossless(t *testing.T) {
 	}
 }
 
+// pngHeaderOnly returns a PNG signature plus an IHDR chunk claiming the given
+// dimensions, without any image data.
+func pngHeaderOnly(w, h uint32) []byte {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], w)
+	binary.BigEndian.PutUint32(ihdr[4:], h)
+	ihdr[8], ihdr[9] = 8, 6 // 8-bit RGBA
+	chunk := append([]byte("IHDR"), ihdr...)
+	var out bytes.Buffer
+	out.WriteString("\x89PNG\r\n\x1a\n")
+	_ = binary.Write(&out, binary.BigEndian, uint32(len(ihdr)))
+	out.Write(chunk)
+	_ = binary.Write(&out, binary.BigEndian, crc32.ChecksumIEEE(chunk))
+	return out.Bytes()
+}
+
+func TestPNGDimensionLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bomb.png")
+	_ = os.WriteFile(path, pngHeaderOnly(100000, 100000), 0o644)
+	res := Process(quietConfig(), []string{path})
+	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0].Err.Error(), "pixel limit") {
+		t.Fatalf("expected a pixel limit error, got %v", res.Errors)
+	}
+}
+
 func TestDirectoryRequiresRecurse(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "x.txt"), []byte("x"), 0o644)
 	if res := Process(quietConfig(), []string{dir}); len(res.Errors) != 1 {
 		t.Fatalf("expected one error, got %v", res.Errors)
+	}
+}
+
+func TestSymlinksAreNeverReplaced(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.txt")
+	_ = os.WriteFile(target, compressibleText(), 0o644)
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cfg := quietConfig()
+	cfg.GzipMode = true
+	cfg.Recursive = true
+
+	// Explicit symlink argument: error, link untouched.
+	if res := Process(cfg, []string{link}); len(res.Errors) != 1 {
+		t.Fatalf("expected one error, got %v", res.Errors)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("symlink was modified")
+	}
+
+	// During traversal links are skipped silently.
+	if res := Process(cfg, []string{dir}); res.HasErrors() {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	if _, err := os.Stat(link + ".gz"); err == nil {
+		t.Fatal("symlink was followed during traversal")
+	}
+	if _, err := os.Stat(target + ".gz"); err != nil {
+		t.Fatal("regular file was not processed")
 	}
 }

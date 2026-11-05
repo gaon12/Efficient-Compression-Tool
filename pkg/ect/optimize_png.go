@@ -2,14 +2,29 @@ package ect
 
 import (
 	"bytes"
+	"fmt"
 	"image/png"
 	"os"
 )
+
+// maxPNGPixels bounds the decoded canvas (256 megapixels, i.e. up to 1 GiB
+// for 8-bit RGBA and 2 GiB for 16-bit RGBA).
+const maxPNGPixels = 1 << 28
 
 func optimizePNG(path string, info os.FileInfo, cfg Config) (before, after int64, changed bool, err error) {
 	original, err := os.ReadFile(path)
 	if err != nil {
 		return 0, 0, false, err
+	}
+
+	// Check the declared dimensions before decoding: a tiny, crafted file
+	// can otherwise claim an enormous canvas and force a huge allocation.
+	imgCfg, err := png.DecodeConfig(bytes.NewReader(original))
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if int64(imgCfg.Width)*int64(imgCfg.Height) > maxPNGPixels {
+		return 0, 0, false, fmt.Errorf("PNG dimensions %dx%d exceed the %d pixel limit", imgCfg.Width, imgCfg.Height, maxPNGPixels)
 	}
 
 	img, err := png.Decode(bytes.NewReader(original))

@@ -2,11 +2,18 @@ package ect
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 )
+
+// errSymlink is reported for symbolic links passed explicitly on the command
+// line. Optimized output replaces files via rename, which would silently turn
+// a link into a regular file (and leave its target untouched), so links are
+// refused instead of being processed "through".
+var errSymlink = errors.New("symbolic links are not processed")
 
 func Process(cfg Config, paths []string) Result {
 	return NewProcessor(cfg).ProcessPaths(paths)
@@ -79,9 +86,15 @@ func (p *Processor) collectFiles(paths []string, rb *resultBuilder) []string {
 	filesMap := make(map[string]struct{})
 
 	for _, path := range paths {
-		info, err := os.Stat(path)
+		// Lstat (not Stat) so that symbolic links are detected instead of
+		// followed; see errSymlink for the rationale.
+		info, err := os.Lstat(path)
 		if err != nil {
 			rb.addError(path, err)
+			continue
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			rb.addError(path, errSymlink)
 			continue
 		}
 
@@ -95,12 +108,14 @@ func (p *Processor) collectFiles(paths []string, rb *resultBuilder) []string {
 			continue
 		}
 
-		err = filepath.WalkDir(path, func(filePath string, d os.DirEntry, walkErr error) error {
+		err = filepath.WalkDir(path, func(filePath string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				rb.addError(filePath, walkErr)
 				return nil
 			}
-			if d.IsDir() {
+			if d.IsDir() || d.Type()&fs.ModeSymlink != 0 {
+				// Links are skipped while walking: following them could
+				// escape the requested tree or loop forever.
 				return nil
 			}
 			filesMap[filePath] = struct{}{}
@@ -153,9 +168,13 @@ func (p *Processor) processFiles(files []string, rb *resultBuilder) {
 }
 
 func (p *Processor) processFile(path string, rb *resultBuilder) {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		rb.addError(path, err)
+		return
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		rb.addError(path, errSymlink)
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -113,9 +114,6 @@ func compressFileToGzip(path string, info os.FileInfo, cfg Config) (outSize int6
 	}
 
 	outPath := path + ".gz"
-	if _, err := os.Stat(outPath); err == nil {
-		return 0, errors.New("compressed file already exists")
-	}
 
 	in, err := os.Open(path)
 	if err != nil {
@@ -123,7 +121,14 @@ func compressFileToGzip(path string, info os.FileInfo, cfg Config) (outSize int6
 	}
 	defer in.Close()
 
-	out, err := os.Create(outPath)
+	// O_EXCL makes "check that the output does not exist" and "create it" a
+	// single atomic step, so an existing .gz (or one created concurrently)
+	// is never truncated. 0600 keeps partial output private until the
+	// original permissions are applied below.
+	out, err := os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return 0, errors.New("compressed file already exists")
+	}
 	if err != nil {
 		return 0, err
 	}

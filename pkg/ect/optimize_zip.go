@@ -236,6 +236,11 @@ func collectDirectoryEntries(root string) (dirs []string, files []string, err er
 		if walkErr != nil {
 			return walkErr
 		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			// Never follow links while packing: they could point outside the
+			// directory being archived or form a cycle.
+			return nil
+		}
 		if d.IsDir() {
 			if path != root {
 				dirs = append(dirs, path)
