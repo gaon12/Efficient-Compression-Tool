@@ -67,8 +67,8 @@ Instrumented builds are worth running too. Put a `-` in their names
 ```bash
 # C/C++ with AddressSanitizer + UndefinedBehaviorSanitizer
 cmake -S src -B build-san -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize=alignment -fno-sanitize-recover=undefined" \
-  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize=alignment -fno-sanitize-recover=undefined"
+  -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined" \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined"
 # Go with the race detector
 go build -race -o ect-go-race ./cmd/ect
 # Rust with debug assertions and overflow checks
@@ -95,3 +95,8 @@ The harness found the bugs fixed in `cpp-v0.9.8`, `go-v0.11.0` and
 `rust-v0.1.0`. Those include lossy color-key PNGs (Rust), dropped PNG
 metadata (Go, Rust) and APNG frames (Go), corrupt JPEGs aborting a whole run
 (C/C++), and memory-safety bugs found by ASan/UBSan (C/C++).
+
+Alignment checking used to be turned off (`-fno-sanitize=alignment`)
+because the deflate code read and wrote through casted pointers. The cpp
+branch now uses memcpy loads and stores in zopfli, the bundled zlib and
+miniz, so the sanitizer builds run with every UBSan check enabled.
