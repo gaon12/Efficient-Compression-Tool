@@ -30,6 +30,8 @@
 #include "zopfli/deflate.h"
 #include "main.h"
 #include "lodepng/lodepng.h"
+#include "palette_order.h"
+#include <unordered_map>
 
 struct ZopfliPNGOptions {
   ZopfliPNGOptions();
@@ -354,6 +356,113 @@ static void LossyOptimizeTransparent(lodepng::State* inputstate, unsigned char* 
 
 // Tries to optimize given a single PNG filter strategy.
 // Returns 0 if ok, other value for error
+/* Palette indices are arbitrary, so PNG filters, which predict a byte from
+its neighbours, rarely help indexed images in their original order. After
+reordering the palette so that colors that are often next to each other get
+nearby indices (oxipng's luma, ezeng and battiato orders), filtering often
+pays off. Each order is tried unfiltered and filtered; the deflate size
+estimator ranks them, and only the best one is actually encoded. */
+static void TryPaletteOrders(const unsigned char* image, size_t imagesize, unsigned w, unsigned h,
+                             lodepng::State& state, const LodePNGColorMode& ref, const LodePNGColorMode& input,
+                             std::vector<unsigned char>* out) {
+  const size_t n = ref.palettesize;
+  const size_t pixels = (size_t)w * h;
+  if (ref.colortype != LCT_PALETTE || n < 3 || n > 256 || pixels < 1024 || imagesize < pixels * 4) return;
+
+  std::unordered_map<uint32_t, unsigned char> lookup;
+  for (size_t i = 0; i < n; i++) {
+    const unsigned char* c = &ref.palette[i * 4];
+    lookup.emplace((uint32_t)c[0] | (uint32_t)c[1] << 8 | (uint32_t)c[2] << 16 | (uint32_t)c[3] << 24, (unsigned char)i);
+  }
+  std::vector<unsigned char> idx(pixels);
+  for (size_t i = 0; i < pixels; i++) {
+    const unsigned char* c = &image[i * 4];
+    auto it = lookup.find((uint32_t)c[0] | (uint32_t)c[1] << 8 | (uint32_t)c[2] << 16 | (uint32_t)c[3] << 24);
+    if (it == lookup.end()) return;
+    idx[i] = it->second;
+  }
+
+  palette_order::CoOccurrence matrix(idx.data(), w, h, n);
+  std::vector<std::vector<size_t> > orders;
+  std::vector<size_t> identity(n);
+  for (size_t i = 0; i < n; i++) identity[i] = i;
+  orders.push_back(identity);
+  orders.push_back(palette_order::Luma(ref.palette, n, idx.data(), w, h));
+  orders.push_back(palette_order::Ezeng(matrix, 1, pixels));
+  orders.push_back(palette_order::Battiato(matrix));
+  /* The palette order of the input file, which may already be a good one. */
+  if (input.colortype == LCT_PALETTE) {
+    std::vector<size_t> order;
+    std::vector<bool> used(n);
+    for (size_t i = 0; i < input.palettesize; i++) {
+      const unsigned char* c = &input.palette[i * 4];
+      auto it = lookup.find((uint32_t)c[0] | (uint32_t)c[1] << 8 | (uint32_t)c[2] << 16 | (uint32_t)c[3] << 24);
+      if (it != lookup.end() && !used[it->second]) {
+        used[it->second] = true;
+        order.push_back(it->second);
+      }
+    }
+    for (size_t i = 0; i < n; i++) if (!used[i]) order.push_back(i);
+    orders.push_back(order);
+  }
+
+  /* Rank on evenly spaced bands of rows, at most about 256K pixels, which
+     keeps this cheap on large images. */
+  const size_t kBand = 32, kMaxPixels = 262144;
+  std::vector<unsigned> sample;
+  if (pixels <= kMaxPixels) {
+    for (unsigned y = 0; y < h; y++) sample.push_back(y);
+  } else {
+    size_t bands = std::max<size_t>(1, kMaxPixels / ((size_t)w * kBand));
+    for (size_t b = 0; b < bands; b++) {
+      size_t start = (size_t)h * b / bands;
+      for (size_t y = start; y < std::min<size_t>(h, start + kBand); y++) sample.push_back((unsigned)y);
+    }
+  }
+  const unsigned sh = (unsigned)sample.size();
+  const size_t stride = (size_t)w + 1;
+  std::vector<unsigned char> remapped((size_t)w * sh), rows(stride * sh), filtered(stride * sh);
+  double base = 0, best = 0;
+  size_t best_order = 0;
+  bool best_filtered = false;
+  for (size_t o = 0; o < orders.size(); o++) {
+    const std::vector<size_t>& order = orders[o];
+    if (order.size() != n) continue;
+    unsigned char map[256];
+    for (size_t i = 0; i < n; i++) map[order[i]] = (unsigned char)i;
+    for (unsigned s = 0; s < sh; s++) {
+      const unsigned char* src = &idx[(size_t)sample[s] * w];
+      unsigned char* dst = &remapped[(size_t)s * w];
+      for (unsigned x = 0; x < w; x++) dst[x] = map[src[x]];
+      rows[s * stride] = 0;
+      memcpy(&rows[s * stride + 1], dst, w);
+    }
+    double zero = lodepng::estimateDeflate(rows.data(), rows.size());
+    if (lodepng::filterEstimated(filtered.data(), remapped.data(), sh, w, 1)) return;
+    double filt = lodepng::estimateDeflate(filtered.data(), filtered.size());
+    if (o == 0) best = base = zero;
+    if (zero < best) { best = zero; best_order = o; best_filtered = false; }
+    if (filt < best) { best = filt; best_order = o; best_filtered = true; }
+  }
+  if (best_order == 0 && !best_filtered) return;
+  /* Another encode is only worth it for a clear estimated gain. */
+  if (best > base * 0.99) return;
+
+  lodepng_color_mode_copy(&state.info_png.color, &ref);
+  state.info_png.color.bitdepth = 8;
+  for (size_t i = 0; i < n; i++) {
+    memcpy(&state.info_png.color.palette[i * 4], &ref.palette[orders[best_order][i] * 4], 4);
+  }
+  state.encoder.auto_convert = 0;
+  state.encoder.filter_strategy = best_filtered ? LFS_ESTIMATE : LFS_ZERO;
+  LodePNGPaletteSettings p;
+  p.order = LPOS_NONE;
+  std::vector<unsigned char> out2;
+  if (!lodepng::encode(out2, image, imagesize, w, h, state, p) && out2.size() < out->size()) {
+    out->swap(out2);
+  }
+}
+
 static unsigned TryOptimize(unsigned char* image, size_t imagesize, unsigned w, unsigned h, bool bit16, const lodepng::State& inputstate,
                             const ZopfliPNGOptions* png_options, std::vector<unsigned char>* out, int best_filter, std::vector<unsigned char> filters, unsigned palette_filter) {
   lodepng::State state;
@@ -484,6 +593,10 @@ static unsigned TryOptimize(unsigned char* image, size_t imagesize, unsigned w, 
     if (!lodepng::encode(out2, image, imagesize, w, h, state, p8) && out2.size() < out->size()) {
       out->swap(out2);
     }
+  }
+
+  if (!error && !bit16) {
+    TryPaletteOrders(image, imagesize, w, h, state, ref_color, inputstate.info_png.color, out);
   }
 
   if(!error){
