@@ -523,6 +523,12 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
   memmove(fp_w, fp_, zip_offset);
   uint8_t* p_write = fp_w + zip_offset;
 
+  // A damaged entry is copied unchanged. If no entry is recompressed either,
+  // the rewrite would only rebuild the headers and drop bytes the records do
+  // not account for, so a damaged archive is then left untouched.
+  bool damaged = false;
+  bool recompressed = false;
+
   // Local file header and data.
   for (ParsedCDHeader& cd_header : cd_headers) {
     (*files)++;
@@ -597,6 +603,7 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
           cd_header.compressed_size == cd_header.uncompressed_size &&
           crc32(0, p_read_data, static_cast<uInt>(cd_header.compressed_size)) == cd_header.header.crc32;
       if (!stored_entry_valid) {
+        damaged = true;
         cerr << filename << ": CRC32 or size mismatch in stored entry, copying it unchanged." << endl;
       }
     }
@@ -670,6 +677,7 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
       if (error || decompressed_size != cd_header.uncompressed_size ||
           cd_header.header.crc32 != crc32(0, decompress_buf, static_cast<uInt>(cd_header.uncompressed_size))) {
         cerr << "Decompression failed or CRC32 mismatch, skipping this file." << endl;
+        damaged = true;
         free(decompress_buf);
         memmove(entry_data_write, p_read_data, static_cast<size_t>(cd_header.compressed_size));
         final_method = local_header->compression_method;
@@ -710,6 +718,11 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
         free(decompress_buf);
         free(compress_buf);  // allocated with malloc/realloc by ZopfliBuffer
       }
+    }
+
+    if (final_method != local_header_in.compression_method || final_compressed_size != cd_header.compressed_size ||
+        final_crc != cd_header.header.crc32) {
+      recompressed = true;
     }
 
     // Write/insert local Zip64 extra only when needed by size fields.
@@ -853,6 +866,10 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
   memcpy(p_write, &eocd, sizeof(EOCD));
   memcpy(p_write + sizeof(EOCD), archive_comment.data(), archive_comment.size());
 
+  if (damaged && !recompressed) {
+    cerr << "Damaged ZIP and no entry could be optimized, leaving it unchanged." << endl;
+    return size_;
+  }
   size_ = p_write + sizeof(EOCD) + archive_comment.size() - fp_;
   return size_;
 }
