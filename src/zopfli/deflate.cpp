@@ -1060,7 +1060,7 @@ static void DeflateDynamicBlock(const ZopfliOptions* options, int final,
                                 const unsigned char* in,
                                 size_t instart, size_t inend,
                                 unsigned char* bp,
-                                unsigned char** out, size_t* outsize, unsigned char* costmodelnotinited, SymbolStats* statsp, unsigned char twiceMode, ZopfliLZ77Store* twiceStore, unsigned mfinexport) {
+                                unsigned char** out, size_t* outsize, unsigned char* costmodelnotinited, SymbolStats* statsp, unsigned char twiceMode, ZopfliLZ77Store* twiceStore, unsigned mfinexport, ZopfliLZ77Store* parsed = 0, int* parsedtype = 0) {
   size_t blocksize = inend - instart;
   ZopfliLZ77Store store;
   int btype = 2;
@@ -1094,7 +1094,11 @@ static void DeflateDynamicBlock(const ZopfliOptions* options, int final,
     }
   }
 
-  if (twiceMode & 1){
+  if (parsed){
+    *parsed = store;
+    *parsedtype = btype;
+  }
+  else if (twiceMode & 1){
     ZopfliInitLZ77Store(twiceStore);
     twiceStore->dists = store.dists;
     twiceStore->litlens = store.litlens;
@@ -1297,6 +1301,78 @@ static void ZopfliDeflateMulti(const ZopfliOptions* options, int final,
  squeezed.
  Parameters: see description of the ZopfliDeflate function.
  */
+/*
+The block splitter decides on LZ77 data from a cheap parse with estimated
+costs. After the optimal parse, some neighbouring blocks cost less as one
+block, because the second Huffman header is not worth what it saves. Parse
+all blocks first, then merge each block into the previous one when one
+dynamic block over both parses is smaller, and only then emit them.
+*/
+static void MergeAndEmitBlocks(const ZopfliOptions* options, int final, const unsigned char* in,
+                               size_t instart, size_t inend, const size_t* splitpoints, size_t npoints,
+                               SymbolStats* statsp, unsigned char* bp, unsigned char** out, size_t* outsize,
+                               unsigned char* costmodelnotinited, unsigned char twiceMode) {
+  size_t n = npoints + 1;
+  ZopfliLZ77Store* st = (ZopfliLZ77Store*)malloc(n * sizeof(ZopfliLZ77Store));
+  int* type = (int*)malloc(n * sizeof(int));
+  size_t* start = (size_t*)malloc((n + 1) * sizeof(size_t));
+  if (!st || !type || !start) exit(1);
+  for (size_t i = 0; i < n; i++) {
+    start[i] = i == 0 ? instart : splitpoints[i - 1];
+  }
+  start[n] = inend;
+  for (size_t i = 0; i < n; i++) {
+    unsigned x = i == 0 ? 2 : i == npoints ? 1 : 3;
+    DeflateDynamicBlock(options, 0, in, start[i], start[i + 1], bp, out, outsize,
+                        costmodelnotinited, &(statsp[i]), twiceMode, 0, x, &st[i], &type[i]);
+  }
+
+  size_t cur = 0;
+  double curcost = ZopfliCalculateBlockSize(st[0].litlens, st[0].dists, 0, st[0].size, type[0], options->searchext, st[0].symbols);
+  size_t* blockstart = (size_t*)malloc((n + 1) * sizeof(size_t));
+  if (!blockstart) exit(1);
+  size_t nblocks = 0;
+  blockstart[nblocks++] = start[0];
+  for (size_t i = 1; i < n; i++) {
+    double nextcost = ZopfliCalculateBlockSize(st[i].litlens, st[i].dists, 0, st[i].size, type[i], options->searchext, st[i].symbols);
+    size_t oldsize = st[cur].size;
+    st[cur].litlens = (unsigned short*)realloc(st[cur].litlens, (oldsize + st[i].size) * sizeof(unsigned short));
+    st[cur].dists = (unsigned short*)realloc(st[cur].dists, (oldsize + st[i].size) * sizeof(unsigned short));
+    if (!st[cur].litlens || !st[cur].dists) exit(1);
+    memcpy(st[cur].litlens + oldsize, st[i].litlens, st[i].size * sizeof(unsigned short));
+    memcpy(st[cur].dists + oldsize, st[i].dists, st[i].size * sizeof(unsigned short));
+    st[cur].size = oldsize + st[i].size;
+    double merged = ZopfliCalculateBlockSize(st[cur].litlens, st[cur].dists, 0, st[cur].size, 2, options->searchext, st[cur].symbols);
+    if (merged < curcost + nextcost) {
+      type[cur] = 2;
+      curcost = merged;
+      ZopfliCleanLZ77Store(&st[i]);
+    }
+    else {
+      st[cur].size = oldsize;
+      cur++;
+      st[cur] = st[i];
+      type[cur] = type[i];
+      curcost = nextcost;
+      blockstart[nblocks++] = start[i];
+    }
+  }
+  blockstart[nblocks] = inend;
+
+  for (size_t i = 0; i < nblocks; i++) {
+    AddLZ77Block(type[i], i + 1 == nblocks && final, st[i].litlens, st[i].dists, st[i].size,
+                 blockstart[i + 1] - blockstart[i], bp, out, outsize, options->searchext, in, blockstart[i],
+                 options->replaceCodes, options->advanced);
+    if (!options->replaceCodes){
+      ZopfliCleanLZ77Store(&st[i]);
+    }
+  }
+  free(blockstart);
+  free(start);
+  free(type);
+  free(st);
+}
+
 static void DeflateSplittingFirst(const ZopfliOptions* options,
                                   int final,
                                   const unsigned char* in,
@@ -1315,7 +1391,11 @@ static void DeflateSplittingFirst(const ZopfliOptions* options,
       exit(1);
     }
   }
-  for (size_t i = 0; i <= npoints; i++) {
+  if (npoints && !(twiceMode & 1)){
+    MergeAndEmitBlocks(options, final, in, instart, inend, splitpoints, npoints, statsp,
+                       bp, out, outsize, costmodelnotinited, twiceMode);
+  }
+  else for (size_t i = 0; i <= npoints; i++) {
     size_t start = i == 0 ? instart : splitpoints[i - 1];
     size_t end = i == npoints ? inend : splitpoints[i];
     unsigned x = npoints == 0 ? 0 : i == 0 ? 2 : i == npoints ? 1 : 3;
