@@ -216,7 +216,12 @@ impl Processor {
                     "gzip optimized",
                     gzip::optimize_existing_gzip(path, &meta, cfg)?,
                 ),
-                FileType::Zip => (
+                // Like the C/C++ version, ZIP archives are only rewritten
+                // with -zip: many formats are ZIP files (.jar, .apk, .docx,
+                // .epub, ...) and rewriting them unasked can break
+                // whole-file signatures (APK v2+) or format-specific layout
+                // rules (EPUB's stored mimetype entry must come first).
+                FileType::Zip if cfg.zip_mode => (
                     "ZIP optimized",
                     zip_opt::optimize_existing_zip(path, &meta, cfg)?,
                 ),

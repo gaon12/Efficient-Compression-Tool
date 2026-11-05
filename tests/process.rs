@@ -31,6 +31,14 @@ fn quiet() -> Config {
     }
 }
 
+/// `-zip`: existing ZIP archives are only rewritten in this mode.
+fn quiet_zip() -> Config {
+    Config {
+        zip_mode: true,
+        ..quiet()
+    }
+}
+
 #[test]
 fn gzip_mode_creates_gz_and_roundtrips() {
     let dir = scratch_dir("gzip");
@@ -114,16 +122,22 @@ fn stored_zip_entries_are_deflated_unless_strict() {
     let path = dir.join("a.zip");
     fs::write(&path, stored_zip(&[("a.txt", &text), ("tiny", b"x")])).unwrap();
 
+    // Without -zip the archive is not touched at all.
+    let original = fs::read(&path).unwrap();
+    let report = ect::process(quiet(), &[&path]);
+    assert!(!report.has_errors(), "{:?}", report.errors);
+    assert_eq!(fs::read(&path).unwrap(), original);
+
     // --strict keeps stored entries stored, so nothing shrinks.
     let strict = Config {
         strict: true,
-        ..quiet()
+        ..quiet_zip()
     };
     let report = ect::process(strict, &[&path]);
     assert!(!report.has_errors(), "{:?}", report.errors);
     assert_eq!(report.saved_bytes, 0);
 
-    let report = ect::process(quiet(), &[&path]);
+    let report = ect::process(quiet_zip(), &[&path]);
     assert!(!report.has_errors(), "{:?}", report.errors);
     assert!(report.saved_bytes > 0);
     assert_eq!(
@@ -240,7 +254,7 @@ fn zip_optimization_preserves_modification_time() {
     let path = dir.join("ts.zip");
     fs::write(&path, w.finish().unwrap().into_inner()).unwrap();
 
-    let report = ect::process(quiet(), &[&path]);
+    let report = ect::process(quiet_zip(), &[&path]);
     assert!(!report.has_errors(), "{:?}", report.errors);
     assert!(report.saved_bytes > 0);
 
