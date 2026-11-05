@@ -291,17 +291,24 @@ static unsigned char OptimizePNG(const char * Infile, const ECTOptions& Options)
     if(!PNGDimensionsWithinLimit(Infile)){
         return 1;
     }
-    if(mode == 9 && !Options.Reuse && !Options.Allfilters){
-        x = Zopflipng(Options.strip, Infile, Options.Strict, 3, 0, Options.DeflateMultithreading, quiet);
-        if(x < 0){
-            return 1;
-        }
-    }
     //Disabled as using this causes libpng warnings
     //int filter = Optipng(Options.Mode, Infile, true, Options.Strict || Options.Mode > 1);
     int filter = 0;
     if (!Options.Allfilters){
-        filter = Options.Reuse ? 6 : Optipng(mode, Infile, false, Options.Strict || mode > 1);
+        if (Options.Reuse){
+            filter = 6;
+        }
+        else if (mode >= 3){
+            /* Choose the filters by estimating the deflate size of each
+               candidate (LFS_AUTO) instead of compressing the image twice
+               with zlib in Optipng. That is faster and predicts the zopfli
+               size better, so -9 no longer needs an extra unfiltered pass
+               either. */
+            filter = 17;
+        }
+        else {
+            filter = Optipng(mode, Infile, false, Options.Strict || mode > 1);
+        }
     }
 
     if (filter == -1){
@@ -327,14 +334,12 @@ static unsigned char OptimizePNG(const char * Infile, const ECTOptions& Options)
             Zopflipng(Options.strip, Infile, Options.Strict, _mode, 11 + Options.palette_sort, Options.DeflateMultithreading, quiet);
             Zopflipng(Options.strip, Infile, Options.Strict, _mode, 12 + Options.palette_sort, Options.DeflateMultithreading, quiet);
             Zopflipng(Options.strip, Infile, Options.Strict, _mode, 13 + Options.palette_sort, Options.DeflateMultithreading, quiet);
+            Zopflipng(Options.strip, Infile, Options.Strict, _mode, 16 + Options.palette_sort, Options.DeflateMultithreading, quiet);
             if (Options.Allfiltersbrute){
                 Zopflipng(Options.strip, Infile, Options.Strict, _mode, 9 + Options.palette_sort, Options.DeflateMultithreading, quiet);
                 Zopflipng(Options.strip, Infile, Options.Strict, _mode, 10 + Options.palette_sort, Options.DeflateMultithreading, quiet);
                 Zopflipng(Options.strip, Infile, Options.Strict, _mode, 14 + Options.palette_sort, Options.DeflateMultithreading, quiet);
             }
-        }
-        else if (mode == 9){
-            Zopflipng(Options.strip, Infile, Options.Strict, _mode, filter + Options.palette_sort, Options.DeflateMultithreading, quiet);
         }
         else {
             x = Zopflipng(Options.strip, Infile, Options.Strict, _mode, filter + Options.palette_sort, Options.DeflateMultithreading, quiet);

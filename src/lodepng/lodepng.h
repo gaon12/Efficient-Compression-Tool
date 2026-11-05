@@ -416,7 +416,14 @@ typedef enum LodePNGFilterStrategy {
   LFS_INCREMENTAL2 = 12,
   LFS_INCREMENTAL3 = 13,
   LFS_GENETIC = 14,
-  LFS_ALL_CHEAP = 15
+  LFS_ALL_CHEAP = 15,
+  /*Per scanline, the filter type with the smallest estimated deflate size of
+  all rows so far (see filter_estimator.h). About as good as LFS_INCREMENTAL
+  and much faster.*/
+  LFS_ESTIMATE = 16,
+  /*LFS_ZERO or LFS_ESTIMATE, whichever has the smaller estimated deflate size
+  of the whole image.*/
+  LFS_AUTO = 17
 } LodePNGFilterStrategy;
 
 typedef enum LodePNGPalettePriorityStrategy {

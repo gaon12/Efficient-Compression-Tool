@@ -37,6 +37,8 @@ Rename this file to lodepng.cpp to use it for C++, or to lodepng.c to use it for
 
 #ifdef LODEPNG_COMPILE_CPP
 #include <algorithm>
+#include <vector>
+#include "filter_estimator.h"
 #endif /*LODEPNG_COMPILE_CPP*/
 
 #ifdef LODEPNG_COMPILE_DISK
@@ -3310,7 +3312,7 @@ static void filterScanline2(unsigned char* scanline, const unsigned char* prevli
   if(!filterType) {
     for(size_t i = 0; i < length; i+=4) {
       if(!scanline[i + 3]) {
-        *(unsigned*)&scanline[i] = 0;
+        memset(&scanline[i], 0, 4);
       }
     }
   }
@@ -3318,7 +3320,7 @@ static void filterScanline2(unsigned char* scanline, const unsigned char* prevli
     if(!prevline) {
       for(size_t i = 0; i < length; i+=4) {
         if(!scanline[i + 3]) {
-          *(unsigned*)&scanline[i] = 0;
+          memset(&scanline[i], 0, 4);
         }
       }
     } else {
@@ -3333,7 +3335,7 @@ static void filterScanline2(unsigned char* scanline, const unsigned char* prevli
   } else if(filterType == 3) {
     if(!prevline) {
       if(!scanline[3]) {
-        *(unsigned*)scanline = 0;
+        memset(scanline, 0, 4);
       }
       for(size_t i = 4; i < length; i+=4) {
         if(!scanline[i + 3]) {
@@ -3413,6 +3415,103 @@ static int windowbits(unsigned long len) {
     result = 15;
   }
   return -result;
+}
+
+/*Chooses the filter of each scanline with filter_estimator::FilterEstimator:
+every filter type is appended to the rows chosen so far, and the one with the
+smallest estimated deflate size wins. Ties prefer Paeth, and repeating the type
+of the previous row gets a small bonus. With warm_start, the first 32 KiB of
+rows are chosen this way and then compared with each uniform filter, since the
+parse has too little history there to judge single rows.
+clean: RGBA8 whose fully transparent pixels may get any RGB value; that RGB is
+predicted per filter type as filterScanline2 does.*/
+static unsigned filterEstimated(unsigned char* out, const unsigned char* in, unsigned h,
+                                size_t linebytes, size_t bytewidth, bool clean, bool warm_start) {
+  const size_t stride = linebytes + 1;
+  const unsigned opening_rows = warm_start ? (unsigned)std::min<size_t>(h, 32768 / stride) : 0;
+  const size_t opening_size = opening_rows >= 2 ? opening_rows * stride : 0;
+  filter_estimator::FilterEstimator estimator(stride);
+  std::vector<unsigned char> best_row(stride);
+  std::vector<unsigned char> attempt(std::max(stride, opening_size));
+  std::vector<unsigned char> current(clean ? linebytes : 0), previous(clean ? linebytes : 0);
+  const unsigned char* above = 0;
+  unsigned first_row = 0;
+
+  if(opening_size) {
+    filterEstimated(out, in, opening_rows, linebytes, bytewidth, clean, false);
+    filter_estimator::FilterEstimator opening(opening_size, stride);
+    double smallest = opening.score(out, opening_size);
+    opening.keep();
+    for(unsigned candidate = 0; candidate < 5; ++candidate) {
+      const unsigned char* prefix_above = 0;
+      for(unsigned row = 0; row < opening_rows; ++row) {
+        const unsigned char* line = &in[row * linebytes];
+        unsigned char type = row ? (unsigned char)(4 - candidate) : out[0];
+        if(clean) {
+          memcpy(current.data(), line, linebytes);
+          filterScanline2(current.data(), prefix_above, linebytes, type);
+          line = current.data();
+        }
+        attempt[row * stride] = type;
+        filterScanline(&attempt[row * stride + 1], line, prefix_above, linebytes, bytewidth, type);
+        if(clean) memcpy(previous.data(), current.data(), linebytes);
+        prefix_above = clean ? previous.data() : line;
+      }
+      double score = opening.score(attempt.data(), opening_size);
+      if(score < smallest) {
+        smallest = score;
+        opening.keep();
+        memcpy(out, attempt.data(), opening_size);
+      }
+    }
+    for(unsigned row = 0; row < opening_rows; ++row) {
+      const unsigned char* line = &in[row * linebytes];
+      if(clean) {
+        memcpy(current.data(), line, linebytes);
+        filterScanline2(current.data(), above, linebytes, out[row * stride]);
+        memcpy(previous.data(), current.data(), linebytes);
+      }
+      above = clean ? previous.data() : line;
+    }
+    if(opening_rows < h) opening.commit();
+    estimator = std::move(opening);
+    first_row = opening_rows;
+  }
+
+  for(unsigned row = first_row; row < h; ++row) {
+    const unsigned char* source = &in[row * linebytes];
+    unsigned char* dst = &out[row * stride];
+    double smallest = HUGE_VAL;
+    unsigned char best = 0;
+    for(unsigned candidate = 0; candidate < 5; ++candidate) {
+      unsigned char type = (unsigned char)(4 - candidate);
+      const unsigned char* line = source;
+      if(clean) {
+        memcpy(current.data(), source, linebytes);
+        filterScanline2(current.data(), above, linebytes, type);
+        line = current.data();
+      }
+      dst[0] = type;
+      filterScanline(dst + 1, line, above, linebytes, bytewidth, type);
+      double score = estimator.score(out, (row + 1) * stride);
+      if(row && type == out[(row - 1) * stride]) score -= 4;
+      if(score < smallest) {
+        smallest = score;
+        best = type;
+        estimator.keep();
+        memcpy(best_row.data(), dst, stride);
+      }
+    }
+    memcpy(dst, best_row.data(), stride);
+    if(clean) {
+      memcpy(current.data(), source, linebytes);
+      filterScanline2(current.data(), above, linebytes, best);
+      memcpy(previous.data(), current.data(), linebytes);
+    }
+    above = clean ? previous.data() : source;
+    if(row + 1 < h) estimator.commit();
+  }
+  return 0;
 }
 
 static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, unsigned h,
@@ -3640,6 +3739,27 @@ static unsigned filter(unsigned char* out, const unsigned char* in, unsigned w, 
     deflateEnd(&stream);
     deflateEnd(&teststream);
     for(type = 0; type != 5; ++type) free(attempt[type]);
+  } else if(strategy == LFS_ESTIMATE) {
+    error = filterEstimated(out, in, h, linebytes, bytewidth, clean, true);
+  } else if(strategy == LFS_AUTO) {
+    /*Unfiltered data often compresses best for palettes and synthetic images,
+    which the per-row choice cannot see, so compare it with the whole result.
+    The estimate favors unfiltered data a little compared with the final
+    deflate, so it has to be at least 3% smaller to be chosen; on a mixed test
+    set that lands within 0.01% of always picking the better of the two.*/
+    const size_t size = (linebytes + 1) * h;
+    std::vector<unsigned char> zero(size);
+    for(y = 0; y != h; ++y) {
+      unsigned char* row = &zero[y * (linebytes + 1)];
+      row[0] = 0;
+      memcpy(row + 1, &in[y * linebytes], linebytes);
+      if(clean) filterScanline2(row + 1, 0, linebytes, 0);
+    }
+    error = filterEstimated(out, in, h, linebytes, bytewidth, clean, true);
+    if(!error && filter_estimator::FilterEstimator::estimate(zero.data(), size)
+                 < 0.97 * filter_estimator::FilterEstimator::estimate(out, size)) {
+      memcpy(out, zero.data(), size);
+    }
   } else if(strategy == LFS_MINSUM) {
     /*adaptive filtering*/
     unsigned char* attempt[5]; /*five filtering attempts, one for each filter type*/
