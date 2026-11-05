@@ -206,4 +206,16 @@ extern z_const char * const z_errmsg[10]; /* indexed by 2-zlib_error */
 #define ZSWAP32(q) ((((q) >> 24) & 0xff) + (((q) >> 8) & 0xff00) + \
                     (((q) & 0xff00) << 8) + (((q) & 0xff) << 24))
 
+/* ECT: unaligned loads and stores in native byte order. The deflate code of
+   this fork dereferenced casted byte pointers, which is undefined behavior
+   on misaligned addresses; memcpy with a constant size compiles to the
+   same single move. */
+#include <stdint.h>
+#include <string.h>
+static inline uint16_t zread16(const void *p) { uint16_t v; memcpy(&v, p, 2); return v; }
+static inline uint32_t zread32(const void *p) { uint32_t v; memcpy(&v, p, 4); return v; }
+static inline uint64_t zread64(const void *p) { uint64_t v; memcpy(&v, p, 8); return v; }
+static inline void zwrite16(void *p, uint16_t v) { memcpy(p, &v, 2); }
+static inline void zwrite64(void *p, uint64_t v) { memcpy(p, &v, 8); }
+
 #endif /* ZUTIL_H */

@@ -260,7 +260,8 @@ typedef struct internal_state {
 
 #define put_short(s, w) { \
     s->pending += 2; \
-    *(ush*)(&s->pending_buf[s->pending - 2]) = (w) ; \
+    s->pending_buf[s->pending - 2] = (uch)((w) & 0xff); \
+    s->pending_buf[s->pending - 1] = (uch)((ush)(w) >> 8); \
 }
 
 #define MIN_LOOKAHEAD (MAX_MATCH+MIN_MATCH+1)

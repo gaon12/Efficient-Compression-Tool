@@ -119,7 +119,7 @@ static void send_bits(deflate_state* s, uint64_t val, int len) {
   s->bi_buf ^= (val<<s->bi_valid);
   s->bi_valid += len;
   if (s->bi_valid >= 64) {
-    *(uint64_t*)(&s->pending_buf[s->pending]) = s->bi_buf;
+    zwrite64(&s->pending_buf[s->pending], s->bi_buf);
     s->pending += 8;
     s->bi_valid -= 64;
     s->bi_buf = val >> (len - s->bi_valid);
@@ -722,7 +722,7 @@ static void compress_block(s, ltree, dtree)
   int len;
 
   if (s->sym_next != 0) do {
-    dist = *(uint16_t*)&(s->sym_buf[sx]);
+    dist = zread16(&(s->sym_buf[sx]));
     sx += 2;
     lc = s->sym_buf[sx++];
     if (dist == 0) {
@@ -732,7 +732,7 @@ static void compress_block(s, ltree, dtree)
       filled += len;
 
       if(filled >= 64) {
-        *(uint64_t*)(&s->pending_buf[s->pending]) = bit_buf;
+        zwrite64(&s->pending_buf[s->pending], bit_buf);
         s->pending += 8;
         filled -= 64;
         bit_buf = val >> (len - filled);
@@ -749,7 +749,7 @@ static void compress_block(s, ltree, dtree)
       bit_buf ^= (val << filled);
       filled += len;
       if(filled >= 64) {
-        *(uint64_t*)(&s->pending_buf[s->pending]) = bit_buf;
+        zwrite64(&s->pending_buf[s->pending], bit_buf);
         s->pending += 8;
         filled -= 64;
         bit_buf = val >> (len - filled);
@@ -764,7 +764,7 @@ static void compress_block(s, ltree, dtree)
         filled += len;
 
         if(filled >= 64) {
-          *(uint64_t*)(&s->pending_buf[s->pending]) = bit_buf;
+          zwrite64(&s->pending_buf[s->pending], bit_buf);
           s->pending += 8;
           filled -= 64;
           bit_buf = val >> (len - filled);
@@ -778,7 +778,7 @@ static void compress_block(s, ltree, dtree)
       bit_buf ^= (val << filled);
       filled += len;
       if(filled >= 64) {
-        *(uint64_t*)(&s->pending_buf[s->pending]) = bit_buf;
+        zwrite64(&s->pending_buf[s->pending], bit_buf);
         s->pending += 8;
         filled -= 64;
         bit_buf = val >> (len - filled);
@@ -793,7 +793,7 @@ static void compress_block(s, ltree, dtree)
         bit_buf ^= (val << filled);
         filled += len;
         if(filled >= 64) {
-          *(uint64_t*)(&s->pending_buf[s->pending]) = bit_buf;
+          zwrite64(&s->pending_buf[s->pending], bit_buf);
           s->pending += 8;
           filled -= 64;
           bit_buf = val >> (len - filled);
@@ -813,7 +813,7 @@ static void compress_block(s, ltree, dtree)
   filled += len;
 
   if(filled >= 64) {
-    *(uint64_t*)(&s->pending_buf[s->pending]) = bit_buf;
+    zwrite64(&s->pending_buf[s->pending], bit_buf);
     s->pending += 8;
     filled -= 64;
     bit_buf = val >> (len - filled);

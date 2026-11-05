@@ -119,7 +119,7 @@ static const config configuration_table[10] = {
 #include <arm_acle.h>
 ALWAYS_INLINE inline static unsigned
 platform_compute_hash(deflate_state *s, const unsigned char *str) {
-    unsigned v = 0xffffff & *(const unsigned*)str;
+    unsigned v = 0xffffff & zread32(str);
     unsigned hash = __crc32cw(0, v);
     return hash & s->hash_mask;
 }
@@ -130,7 +130,7 @@ platform_compute_hash(deflate_state *s, const unsigned char *str) {
 
 ALWAYS_INLINE inline static unsigned
 platform_compute_hash(deflate_state *s, const unsigned char *str) {
-    unsigned v = 0xffffff & *(const unsigned*)str;
+    unsigned v = 0xffffff & zread32(str);
     unsigned hash = _mm_crc32_u32(0, v);
     return hash & s->hash_mask;
 }
@@ -185,7 +185,7 @@ bulk_insert_str(deflate_state *s, Pos startpos, unsigned count) {
 }
 
 static int _tr_tally_lit(deflate_state *s, uint8_t cc) {
-  *(uint16_t*)&(s->sym_buf[s->sym_next]) = 0;
+  zwrite16(&(s->sym_buf[s->sym_next]), 0);
   s->sym_next += 2;
   s->sym_buf[s->sym_next++] = cc;
   s->dyn_ltree[cc].Freq++;
@@ -193,7 +193,7 @@ static int _tr_tally_lit(deflate_state *s, uint8_t cc) {
 }
 
 static int _tr_tally_dist(deflate_state *s, uint16_t dist, uint8_t len) {
-  *(uint16_t*)&(s->sym_buf[s->sym_next]) = dist;
+  zwrite16(&(s->sym_buf[s->sym_next]), dist);
   s->sym_next += 2;
   s->sym_buf[s->sym_next++] = len;
   dist--;
@@ -936,16 +936,16 @@ IPos cur_match;                             /* current match */
     uint32_t wmask = s->w_mask;
 
     register uint8_t *strend = s->window + s->strstart + MAX_MATCH;
-    uInt scan_start32 = *(uIntf*)scan;          /* 1st 4 bytes of scan */
-    uint64_t scan_start64 = *(uint64_t*)scan;          /* 1st 4 bytes of scan */
+    uInt scan_start32 = zread32(scan);          /* 1st 4 bytes of scan */
+    uint64_t scan_start64 = zread64(scan);          /* 1st 4 bytes of scan */
     register unsigned scan_end32;
     register uint64_t scan_end64;
     int rle_len = 4;
-    if (scan_start32 == (*(uIntf*)(scan + 1)) && s->good_match != MAX_MATCH + 1) {
-      while(rle_len < 252 && *(uint64_t*)(scan + rle_len) == *(uint64_t*)(scan + rle_len + 1)) {
+    if (scan_start32 == (zread32(scan + 1)) && s->good_match != MAX_MATCH + 1) {
+      while(rle_len < 252 && zread64(scan + rle_len) == zread64(scan + rle_len + 1)) {
         rle_len += 8;
       }
-      if (*(unsigned*)(scan + rle_len) == *(unsigned*)(scan + rle_len + 1)) {
+      if (zread32(scan + rle_len) == zread32(scan + rle_len + 1)) {
         rle_len += 4;
       }
     }
@@ -975,9 +975,9 @@ IPos cur_match;                             /* current match */
          * Note: for deflate_fast best_len is always MIN_MATCH-1 here
          */
     //Do this here to avoid OOB read issues
-      scan_end32 = *(unsigned*)(scan+best_len-3);
+      scan_end32 = zread32(scan+best_len-3);
       if (best_len >= 7) {
-        scan_end64 = *(uint64_t*)(scan+best_len-7);
+        scan_end64 = zread64(scan+best_len-7);
       }
         uInt hash;
         /* Find a most distant chain starting from scan with index=1 (index=0 corresponds
@@ -1005,7 +1005,7 @@ IPos cur_match;                             /* current match */
       unsigned scan_start24 = scan_start32 & 0xFFFFFF;
       uint8_t * win = s->window;
       for (;;) {
-        if (unlikely(((*(unsigned*)(win + cur_match)) & 0xFFFFFF) == scan_start24)) break;
+        if (unlikely(((zread32(win + cur_match)) & 0xFFFFFF) == scan_start24)) break;
         NEXT_CHAIN;
       }
     }
@@ -1023,8 +1023,8 @@ IPos cur_match;                             /* current match */
           /* current len >= 7 (looking for 8+ bytes); compare first and last 8 bytes */
           for (;;) {
             IPos cur_match2 = cur_match - OFF;
-              if (*(uint64_t*)(match_base3 + cur_match2) == scan_end64 &&
-                  *(uint64_t*)(win + cur_match2) == scan_start64) break;
+              if (zread64(match_base3 + cur_match2) == scan_end64 &&
+                  zread64(win + cur_match2) == scan_start64) break;
               NEXT_CHAIN;
           }
           cur_match -= OFF;
@@ -1032,8 +1032,8 @@ IPos cur_match;                             /* current match */
             /* current len >= MIN_MATCH (looking for 4+ bytes); compare first and last 4 bytes*/
             for (;;) {
             IPos cur_match2 = cur_match - OFF;
-                if (*(unsigned*)(match_base2 + cur_match2) == scan_end32 &&
-                    *(unsigned*)(win + cur_match2) == scan_start32) break;
+                if (zread32(match_base2 + cur_match2) == scan_end32 &&
+                    zread32(win + cur_match2) == scan_start32) break;
                 NEXT_CHAIN;
             }
             cur_match -= OFF;
@@ -1043,16 +1043,16 @@ IPos cur_match;                             /* current match */
 
         /* Found a match candidate. Compare strings to determine its length. */
       do {
-                      uint64_t sv = *(uint64_t*)(void*)scan;
-                      uint64_t mv = *(uint64_t*)(void*)match;
+                      uint64_t sv = zread64(scan);
+                      uint64_t mv = zread64(match);
                       uint64_t xor = sv ^ mv;
                       if (xor) {
                           scan += (__builtin_ctzll(xor) >> 3);
                           break;
                       }
 
-                      sv = *(uint64_t*)(void*)(scan + 8);
-                      mv = *(uint64_t*)(void*)(match + 8);
+                      sv = zread64(scan + 8);
+                      mv = zread64(match + 8);
                       xor = sv ^ mv;
                       if (xor) {
                           scan += 8 + (__builtin_ctzll(xor) >> 3);
@@ -1071,10 +1071,10 @@ IPos cur_match;                             /* current match */
             s->match_start = cur_match;
             best_len = len;
             if (len >= nice_match) break;
-            scan_end32 = *(uint32_t*)(scan + best_len - 3);
+            scan_end32 = zread32(scan + best_len - 3);
             match_base2 = win + best_len - 3;
             if(best_len >= 7) {
-              scan_end64 = *(uint64_t*)(scan + best_len - 7);
+              scan_end64 = zread64(scan + best_len - 7);
               match_base3 = win + best_len - 7;
             }
 

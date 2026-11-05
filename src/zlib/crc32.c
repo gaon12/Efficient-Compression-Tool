@@ -26,17 +26,17 @@ uint32_t crc32(uint32_t crc, uint8_t *buf, size_t len) {
     crc = ~crc;
 
     while (len >= 8) {
-        crc = __crc32d(crc, *(uint64_t*)buf);
+        crc = __crc32d(crc, zread64(buf));
         len -= 8;
         buf += 8;
     }
 
     if (len & 4) {
-        crc = __crc32w(crc, *(uint32_t*)buf);
+        crc = __crc32w(crc, zread32(buf));
         buf += 4;
     }
     if (len & 2) {
-        crc = __crc32h(crc, *(uint16_t*)buf);
+        crc = __crc32h(crc, zread16(buf));
         buf += 2;
     }
     if (len & 1) {
