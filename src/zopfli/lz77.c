@@ -221,7 +221,7 @@ static void LZ4HC_Insert3 (LZ3HC_Data_Structure* hc4, const BYTE* ip)
 
 static int LZ4HC_InsertAndFindBestMatch(LZ4HC_Data_Structure* hc4,   /* Index table will be updated */
                                                const BYTE* ip, const BYTE* const iLimit,
-                                               const BYTE** matchpos, size_t ml)
+                                               const BYTE** matchpos, size_t ml, int nbAttempts)
 {
   U16* const chainTable = hc4->chainTable;
   U32* const HashTable = hc4->hashTable;
@@ -229,7 +229,6 @@ static int LZ4HC_InsertAndFindBestMatch(LZ4HC_Data_Structure* hc4,   /* Index ta
   const BYTE* base2 = base + ml - 3;
   const U32 lowLimit = (2 * MAXD > (U32)(ip-base)) ? MAXD : (U32)(ip - base) - (MAXD - 1);
   const BYTE* match;
-  int nbAttempts = 650; //PNG 650//ENWIK 600/700
 
   /* HC4 match finder */
   LZ4HC_Insert(hc4, ip);
@@ -330,13 +329,18 @@ void ZopfliLZ77Lazy(const ZopfliOptions* options, const unsigned char* in,
   unsigned prev_match = 0;
   unsigned char match_available = 0;
 
+  /* This parse only guides the block splitter. For PNG a shallow search
+     splits as well and makes -2 about 10% faster; elsewhere it does not
+     save time. */
+  const int nbAttempts = options->isPNG ? 32 : 650;
+
   LZ4HC_init(&mmc, &in[windowstart]);
   LZ4HC_init3(&h3, &in[instart > MAXD3 ? instart - MAXD3 : 0]);
 
 
   for (i = instart; i < inend; i++) {
     const BYTE* matchpos;
-    int y = LZ4HC_InsertAndFindBestMatch(&mmc, &in[i], &in[inend] > &in[i] + ZOPFLI_MAX_MATCH ? &in[i] + ZOPFLI_MAX_MATCH : &in[inend], &matchpos, match_available ? prev_length : 3);
+    int y = LZ4HC_InsertAndFindBestMatch(&mmc, &in[i], &in[inend] > &in[i] + ZOPFLI_MAX_MATCH ? &in[i] + ZOPFLI_MAX_MATCH : &in[inend], &matchpos, match_available ? prev_length : 3, nbAttempts);
 
     if (y >= 4 && i + 4 <= inend){
       dist = &in[i] - matchpos;
