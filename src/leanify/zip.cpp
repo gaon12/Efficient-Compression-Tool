@@ -503,7 +503,19 @@ size_t Zip::Leanify(const ECTOptions& Options, size_t* files) {
 
     // Try to get all CD headers using this EOCD, if everything checks out then proceed.
     if (GetCDHeaders(fp_, size_, cd_offset, cd_size, num_records, zip_offset, &cd_headers, &base_offset)) {
-      break;
+      // The central directory must end where the end records start: right
+      // at the EOCD, or at a Zip64 EOCD record whose locator precedes the
+      // EOCD. Bytes in between mean the archive is damaged (readers that
+      // locate the directory from the EOCD position, like Python's zipfile,
+      // fail on it), and rewriting would silently drop them.
+      const size_t cd_end_pos = base_offset + static_cast<size_t>(cd_offset) + static_cast<size_t>(cd_size);
+      const size_t eocd_pos = p_eocd - fp_;
+      const bool zip64_between = cd_end_pos + 4 <= eocd_pos && eocd_pos >= sizeof(Zip64EOCDLocator) &&
+                                 memcmp(fp_ + cd_end_pos, "\x50\x4B\x06\x06", 4) == 0 &&
+                                 memcmp(p_eocd - sizeof(Zip64EOCDLocator), "\x50\x4B\x06\x07", 4) == 0;
+      if (cd_end_pos == eocd_pos || zip64_between) {
+        break;
+      }
     }
   }
 
