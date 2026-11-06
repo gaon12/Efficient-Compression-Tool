@@ -298,16 +298,13 @@ static unsigned char OptimizePNG(const char * Infile, const ECTOptions& Options)
         if (Options.Reuse){
             filter = 6;
         }
-        else if (mode >= 2){
+        else {
             /* Choose the filters by estimating the deflate size of each
                candidate (LFS_AUTO) instead of compressing the image twice
                with zlib in Optipng. That predicts the zopfli size better,
                so -9 no longer needs an extra unfiltered pass either. At -2
                it costs about 14% more time than Optipng and saves 0.9%. */
             filter = 17;
-        }
-        else {
-            filter = Optipng(mode, Infile, false, Options.Strict || mode > 1);
         }
     }
 
@@ -317,7 +314,7 @@ static unsigned char OptimizePNG(const char * Infile, const ECTOptions& Options)
     if(filter && !Options.Allfilters && Options.Allfilterscheap && !Options.Reuse){
         filter = 15;
     }
-    if (mode != 1){
+    {
         if (Options.Allfilters){
             x = Zopflipng(Options.strip, Infile, Options.Strict, _mode, 6 + Options.palette_sort, Options.DeflateMultithreading, quiet);
             if(x < 0){

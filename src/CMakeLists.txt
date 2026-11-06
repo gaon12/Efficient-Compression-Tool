@@ -159,6 +159,7 @@ option(ECT_MP3_SUPPORT "Enable MP3 support (not currently working)" OFF)
 option(ECT_WEBP_SUPPORT "Enable WebP optimization support" ON)
 
 add_subdirectory(leanify EXCLUDE_FROM_ALL)
+add_subdirectory(libdeflate EXCLUDE_FROM_ALL)
 add_subdirectory(lodepng EXCLUDE_FROM_ALL)
 add_subdirectory(miniz EXCLUDE_FROM_ALL)
 add_subdirectory(zlib EXCLUDE_FROM_ALL)
@@ -192,6 +193,7 @@ add_subdirectory(mozjpeg EXCLUDE_FROM_ALL)
 
 target_link_libraries(ect
   leanify::leanify
+  libdeflate::libdeflate
   lodepng::lodepng
   miniz::miniz
   optipng::optipng

@@ -62,6 +62,9 @@ Benchmarked on 2026-04-21.
 |  ECT -7        |  34,942,246  |   2m 12.3s |
 |  ECT -9        |  34,937,520  |   4m 46.7s |
 
+The `-1` row was measured when `-1` used zlib level 9. It now uses
+libdeflate's level 10, which compresses better at a somewhat higher cost.
+
 Comparisons with the Go and Rust implementations on Windows, Linux and
 macOS are published on the `master` branch.
 
@@ -75,7 +78,8 @@ git clone --recursive -b cpp https://github.com/fhanau/Efficient-Compression-Too
 You also need CMake, a C/C++17 compiler and `nasm` (used by mozjpeg's SIMD
 code). libwebp is optional: when its development files are found, lossless
 WebP optimization is enabled. No system zlib is required; the bundled,
-optimized zlib is used everywhere (including by libpng).
+optimized zlib is used everywhere (including by libpng). The compressor of
+libdeflate (MIT license, in `src/libdeflate`) is bundled for `-1`.
 
 ### Command line (Linux, macOS, MinGW)
 ```bash

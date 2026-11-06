@@ -14,7 +14,8 @@ ifeq ($(OS),Windows_NT)
 	CXXFLAGS += -mno-ms-bitfields
 	CMAKE += -G "MSYS Makefiles"
 endif
-OBJECTS = blocksplitter.o image.o lz77.o opngreduc.o squeeze.o util.o LzFind.o miniz.o transupp.o
+OBJECTS = blocksplitter.o image.o lz77.o opngreduc.o squeeze.o util.o LzFind.o miniz.o transupp.o \
+ld_deflate_compress.o ld_utils.o ld_x86_cpu_features.o ld_arm_cpu_features.o
 CXXSRC = support.cpp zopflipng.cpp zopfli/deflate.cpp zopfli/zopfli_gzip.cpp zopfli/katajainen.cpp \
 lodepng/lodepng.cpp lodepng/lodepng_util.cpp optipng/codec.cpp optipng/optipng.cpp jpegtran.cpp gztools.cpp \
 leanify/zip.cpp leanify/leanify.cpp
@@ -25,6 +26,10 @@ all: deps bin
 bin: deps
 	$(CC) -c $(UCFLAGS) optipng/image.c zopfli/util.c zopfli/squeeze.c zopfli/lz77.c \
 	zopfli/blocksplitter.c optipng/opngreduc/opngreduc.c LzFind.c miniz/miniz.c mozjpeg/transupp.c
+	$(CC) -c $(UCFLAGS) libdeflate/lib/deflate_compress.c -o ld_deflate_compress.o
+	$(CC) -c $(UCFLAGS) libdeflate/lib/utils.c -o ld_utils.o
+	$(CC) -c $(UCFLAGS) libdeflate/lib/x86/cpu_features.c -o ld_x86_cpu_features.o
+	$(CC) -c $(UCFLAGS) libdeflate/lib/arm/cpu_features.c -o ld_arm_cpu_features.o
 	$(CXX) $(UCXXFLAGS) main.cpp libz.a $(OBJECTS) $(CXXSRC) mozjpeg/libjpeg.a libpng/libpng.a -o ${BINPREFIX}/ect $(LDFLAGS)
 clean:
 	rm -f *.o *.a zlib/*.o libpng/*.o libpng/*.a libpng/pngusr.h libpng/pnglibconf.h

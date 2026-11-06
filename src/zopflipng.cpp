@@ -68,6 +68,10 @@ ZopfliPNGOptions::ZopfliPNGOptions()
 // as its compression backend.
 static unsigned CustomPNGDeflate(unsigned char** out, size_t* outsize, const unsigned char* in, size_t insize, const LodePNGCompressSettings* settings) {
   const ZopfliPNGOptions* png_options = static_cast<const ZopfliPNGOptions*>(settings->custom_context);
+  if (png_options->Mode % 10000 < 2) {
+    FastDeflateRaw(in, insize, out, outsize);
+    return 0;
+  }
   unsigned char bp = 0;
   ZopfliOptions options;
   ZopfliInitOptions(&options, png_options->Mode, png_options->multithreading, 1);

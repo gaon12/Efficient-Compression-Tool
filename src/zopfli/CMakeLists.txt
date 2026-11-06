@@ -27,6 +27,9 @@ target_compile_features(zopfli
 	PRIVATE
 		cxx_std_11)
 
+target_link_libraries(zopfli
+	libdeflate::libdeflate)
+
 if(NOT ECT_MULTITHREADING)
 	target_compile_definitions(zopfli
 		PRIVATE
