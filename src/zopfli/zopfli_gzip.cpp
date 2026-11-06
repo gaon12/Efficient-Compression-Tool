@@ -299,8 +299,8 @@ int ZopfliGzip(const char* infilename, const char* outfilename, unsigned mode, u
 // (*out, *outsize). This is ECT's mode 1 ("-1"). Level 10 is libdeflate's
 // fastest near-optimal parse: on PNG it is smaller than pingo -s1 at the
 // same or less CPU time, where zlib level 9 was 9% larger.
-void FastDeflateRaw(const unsigned char* in, size_t insize, unsigned char** out, size_t* outsize) {
-  struct libdeflate_compressor* c = libdeflate_alloc_compressor(10);
+void FastDeflateRaw(const unsigned char* in, size_t insize, unsigned char** out, size_t* outsize, int level) {
+  struct libdeflate_compressor* c = libdeflate_alloc_compressor(level);
   if (!c) {
     fprintf(stderr, "Error: out of memory\n");
     exit(EXIT_FAILURE);

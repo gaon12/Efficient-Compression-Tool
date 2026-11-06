@@ -79,7 +79,8 @@ You also need CMake, a C/C++17 compiler and `nasm` (used by mozjpeg's SIMD
 code). libwebp is optional: when its development files are found, lossless
 WebP optimization is enabled. No system zlib is required; the bundled,
 optimized zlib is used everywhere (including by libpng). The compressor of
-libdeflate (MIT license, in `src/libdeflate`) is bundled for `-1`.
+libdeflate (MIT license, in `src/libdeflate`) is bundled for `-1` and for
+PNGs at `-2`.
 
 ### Command line (Linux, macOS, MinGW)
 ```bash

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 project(libdeflate LANGUAGES C)
 
 # Only the compressor of libdeflate 1.26 (https://github.com/ebiggers/libdeflate,
-# MIT license, see COPYING), used for ECT's fast mode (-1).
+# MIT license, see COPYING), used for ECT's -1 and for PNGs at -2.
 add_library(libdeflate
 	lib/deflate_compress.c
 	lib/utils.c
