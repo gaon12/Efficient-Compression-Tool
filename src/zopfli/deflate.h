@@ -68,6 +68,13 @@ double ZopfliCalculateBlockSize(const unsigned short* litlens,
                                 size_t lstart, size_t lend, int btype, unsigned char hq, unsigned char symbols);
 
 void OptimizeHuffmanCountsForRle(int length, size_t* counts);
+
+/* Writes a complete Deflate stream (last block final) for an LZ77 parse of
+raw lengths and distances, cut into blocks at the given store indices. Each
+block gets the cheaper of a fixed and an optimized dynamic Huffman code. */
+void ZopfliDeflateLZ77(const ZopfliOptions* options, unsigned short* litlens, unsigned short* dists,
+                       size_t size, const size_t* points, size_t npoints, unsigned char* bp,
+                       unsigned char** out, size_t* outsize);
 size_t GetDynamicLengthsuse(unsigned* ll_lengths, unsigned* d_lengths, const size_t* ll_counts, const size_t* d_counts);
 
 size_t CalculateTreeSize(const unsigned* ll_lengths, unsigned* d_lengths, unsigned char hq, unsigned* best);

@@ -1056,6 +1056,21 @@ static void AddLZ77Block(int btype, int final,
   }
 }
 
+void ZopfliDeflateLZ77(const ZopfliOptions* options, unsigned short* litlens, unsigned short* dists,
+                       size_t size, const size_t* points, size_t npoints, unsigned char* bp,
+                       unsigned char** out, size_t* outsize) {
+  for (size_t i = 0; i <= npoints; i++) {
+    size_t s = i == 0 ? 0 : points[i - 1];
+    size_t e = i == npoints ? size : points[i];
+    size_t bytes = 0;
+    for (size_t k = s; k < e; k++) bytes += dists[k] ? litlens[k] : 1;
+    double fixed = ZopfliCalculateBlockSize(litlens, dists, s, e, 1, options->searchext, 0);
+    double dyn = ZopfliCalculateBlockSize(litlens, dists, s, e, 2, options->searchext, 0);
+    AddLZ77Block(fixed < dyn ? 1 : 2, i == npoints, litlens + s, dists + s, e - s, bytes, bp, out, outsize,
+                 options->searchext, 0, 0, 0, options->advanced);
+  }
+}
+
 static void DeflateDynamicBlock(const ZopfliOptions* options, int final,
                                 const unsigned char* in,
                                 size_t instart, size_t inend,

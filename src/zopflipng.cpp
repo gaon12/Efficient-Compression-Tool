@@ -69,15 +69,15 @@ ZopfliPNGOptions::ZopfliPNGOptions()
 static unsigned CustomPNGDeflate(unsigned char** out, size_t* outsize, const unsigned char* in, size_t insize, const LodePNGCompressSettings* settings) {
   const ZopfliPNGOptions* png_options = static_cast<const ZopfliPNGOptions*>(settings->custom_context);
   /* libdeflate's near-optimal parse beats one Zopfli iteration on filtered
-     image data: at level 11 PNG -2 gets 0.2-0.6% smaller and 7-17% faster
-     than with Zopfli -2. -3 and up keep Zopfli, which compresses better
-     for the time there. */
+     image data. -1 takes it as is, to stay fast; -2 uses level 11 and
+     re-encodes it with Zopfli's block splitting and Huffman coding, which is
+     0.4-1% smaller and about as fast as Zopfli -2. -3 and up keep Zopfli. */
   if (png_options->Mode % 10000 < 2) {
     FastDeflateRaw(in, insize, out, outsize);
     return 0;
   }
   if (png_options->Mode % 10000 == 2) {
-    FastDeflateRaw(in, insize, out, outsize, 11);
+    FastDeflateRaw(in, insize, out, outsize, 11, true);
     return 0;
   }
   unsigned char bp = 0;

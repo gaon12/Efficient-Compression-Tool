@@ -61,6 +61,11 @@ of the resulting dynamic blocks.
 */
 double ZopfliResplitCost(const ZopfliOptions* options, const ZopfliLZ77Store* store);
 
+/* Splits an LZ77 store into blocks; *points (malloc'ed) receives the store
+indices where blocks start, *npoints their number. */
+void ZopfliSplitLZ77Store(const ZopfliOptions* options, const ZopfliLZ77Store* store, size_t** points,
+                          size_t* npoints);
+
 #ifdef __cplusplus
 }
 #endif
